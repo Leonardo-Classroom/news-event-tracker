@@ -33,6 +33,23 @@ python manage.py migrate
 python manage.py seed_sources
 ```
 
+## 執行
+
+```bash
+./run.sh            # 啟動全部（PostgreSQL、Redis、Celery、Django）
+./run.sh status     # 服務狀態、資料概況、LLM 餘額
+./run.sh stop       # 停止 Django 與 Celery（資料庫保持執行）
+./run.sh web        # 前景執行 Django，可直接看 traceback
+```
+
+後台： http://localhost:5861/admin/
+
+`stop` 刻意不停 PostgreSQL 與 Redis——它們持有全部語料與向量，
+且背景的向量化作業可能仍在寫入。要停須明確使用 `./run.sh stop-db`。
+
+腳本不使用 `pgrep` / `pkill`：本機曾有程序卡在 D 狀態，
+使任何掃描 `/proc` 的工具永久阻塞（見 ADR-0010），改以 PID 檔管理。
+
 資料庫資料目錄置於 `$HOME/newstrack/pgdata`（WSL2 原生 ext4）。**不可放在 `/mnt/*`**——那裡經 9P 協定存取，PostgreSQL 的 I/O 效能會是災難。安裝腳本會主動拒絕。
 
 ## 測試
