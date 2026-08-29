@@ -105,6 +105,14 @@ class DocumentQuerySet(models.QuerySet):
     def news(self):
         return self.filter(content_class=ContentClass.COPYRIGHTED)
 
+    def relevant(self):
+        """通過相關性過濾者。未評估（null）不計入——
+        「還沒判斷」不等於「相關」。"""
+        return self.filter(relevant=True)
+
+    def pending_relevance(self):
+        return self.filter(relevant__isnull=True).exclude(raw_body="")
+
     def public_records(self):
         return self.filter(content_class=ContentClass.PUBLIC_RECORD)
 
@@ -150,6 +158,13 @@ class Document(models.Model):
         related_name="reprints",
         help_text="若本文為轉載，指向首發版本",
     )
+
+    # --- 相關性過濾（ADR-0009）---
+    # null 表示尚未評估。刻意用三態而非布林預設 False——
+    # 「還沒判斷」與「判斷為不相關」是兩件事，混為一談會讓
+    # 「過濾是否已跑過」變得無法查詢。
+    relevant = models.BooleanField(null=True, blank=True, db_index=True)
+    relevance_signals = models.JSONField(default=dict, blank=True)
 
     # --- 關鍵字檢索（ADR-0001：bigram + PostgreSQL 內建 FTS）---
     # 切分在 Python 完成（bigram 邏輯無法以 SQL 乾淨表達），
