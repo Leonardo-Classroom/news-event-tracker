@@ -23,9 +23,15 @@
 **憑直覺列詞會漏掉整組用語。** 初版遺漏了「檢方」（比「檢察官」更常用）、
 「判刑」「有期徒刑」等判決結果用語、以及「北檢」「新北檢」等簡稱
 （台灣新聞的主流寫法，合計約 3,500 篇）。這些都是靠實測補回來的。
+
+**中文沒有詞界，子字串比對會被更長的詞誤觸發。** 這不是理論顧慮：
+實測「法院」的命中有 47.9% 純粹來自「立法院」，導致「星鏈條款闖關」
+「中油不買天然氣」等完全無關的政治新聞被判為司法案件。
+有歧義的詞改以 ``RELEVANCE_PATTERNS`` 的正則處理。
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from apps.core.identifiers import extract_tax_ids, parse_case_number
@@ -52,10 +58,10 @@ RELEVANCE_TERMS: dict[str, tuple[str, ...]] = {
         "檢察官", "檢察總長", "主任檢察官",
         # 簡稱是台灣新聞的主流寫法，實測合計約 3,500 篇。
         # 只列全稱會系統性漏掉大量報導。
-        "北檢", "新北檢", "士檢", "橋檢", "中檢", "南檢", "雄檢", "高檢",
+        "北檢", "新北檢", "士檢", "橋檢", "中檢", "南檢", "雄檢",
         "檢方", "檢調",
         "地方法院", "高等法院", "最高法院", "智慧財產法院", "懲戒法院",
-        "法院", "法官",
+        "司法院", "法官",
         "調查局", "廉政署", "政風", "刑事局",
     ),
     "corruption_charge": (
@@ -70,6 +76,26 @@ RELEVANCE_TERMS: dict[str, tuple[str, ...]] = {
     "oversight": (
         "彈劾", "糾正案", "糾舉", "監察院", "監委", "審計部",
     ),
+}
+
+#: 有歧義的詞，需以正則排除被更長詞誤觸發的情況。
+#:
+#: 中文沒有詞界，子字串比對會被包含該詞的更長詞誤觸發。實測（3 萬篇抽樣）
+#: 顯示這是嚴重問題，不是理論顧慮：
+#:
+#:     法院  命中 3,380，其中 1,620 篇（**47.9%**）僅來自「立法院」
+#:     高檢  命中   107，其中    18 篇（16.8%）僅來自「提高檢驗」等
+#:
+#: 未處理前，「立法院」相關的政治新聞會大量被誤判為司法案件——
+#: 抽樣中出現「星鏈條款闖關」「中油不買天然氣」「金石堂分店熄燈」等
+#: 完全無關的文件。
+#:
+#: 「司法院」不排除：它本身就是司法脈絡。僅排除「立法院」。
+RELEVANCE_PATTERNS: dict[str, dict[str, re.Pattern]] = {
+    "judicial_body": {
+        "法院": re.compile(r"(?<!立)法院"),
+        "高檢": re.compile(r"(?<![提拉升增])高檢"),
+    },
 }
 
 #: 命中即通過。刻意不設「需命中 N 個」的門檻——那會系統性地漏掉
@@ -108,8 +134,11 @@ def assess_relevance(title: str = "", body: str = "") -> RelevanceResult:
     signals: dict[str, list[str]] = {}
     for category, terms in RELEVANCE_TERMS.items():
         hits = [term for term in terms if term in text]
+        for label, pattern in RELEVANCE_PATTERNS.get(category, {}).items():
+            if pattern.search(text):
+                hits.append(label)
         if hits:
-            signals[category] = hits
+            signals[category] = sorted(set(hits))
 
     # 案號是強訊號。裁判書、起訴書的報導幾乎必然帶案號，
     # 而它同時也是事件歸屬的主要依據（ADR-0001）。

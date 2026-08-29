@@ -96,3 +96,51 @@ class TestTermTable:
     def test_各類別皆非空(self):
         for category, terms in RELEVANCE_TERMS.items():
             assert terms, f"{category} 沒有詞彙"
+
+
+class TestSubstringContamination:
+    """中文沒有詞界，子字串比對會被更長的詞誤觸發。
+
+    這不是理論顧慮：實測「法院」的命中有 47.9% 純粹來自「立法院」，
+    導致「星鏈條款闖關」「中油不買天然氣」「金石堂分店熄燈」等
+    完全無關的政治與商業新聞被判為司法案件。
+
+    這類誤判不會報錯——它只會讓大量雜訊進入事件偵測，
+    產生無意義的事件候選並淹沒審核量能。
+    """
+
+    @pytest.mark.parametrize("text", [
+        "立法院三讀通過明年度中央政府總預算案，朝野協商破局。",
+        "立法院教育委員會今日審查相關法案。",
+        "民進黨立法院黨團召開記者會說明立場。",
+    ])
+    def test_立法院不應觸發法院(self, text):
+        assert assess_relevance(body=text).relevant is False
+
+    @pytest.mark.parametrize("text", [
+        "業者提高檢驗頻率以確保食品安全。",
+        "衛生局將拉高檢查標準。",
+    ])
+    def test_提高檢驗不應觸發高檢(self, text):
+        assert assess_relevance(body=text).relevant is False
+
+    @pytest.mark.parametrize("text,term", [
+        ("法院裁定羈押禁見。", "法院"),
+        ("司法院公布裁判書統計。", "司法院"),
+        ("高檢署指揮本案偵辦。", "高檢署"),
+        ("台灣高等法院今日開庭。", "高等法院"),
+    ])
+    def test_真實司法脈絡仍要命中(self, text, term):
+        """排除誤觸發不可傷及真實命中——那會變成用精確度換召回率，
+        而 ADR-0009 明確要求偏向召回。"""
+        result = assess_relevance(body=text)
+        assert result.relevant is True
+
+    def test_司法院不被排除(self):
+        """只排除立法院。司法院本身就是司法脈絡。"""
+        assert assess_relevance(body="司法院表示將研議修法。").relevant is True
+
+    def test_同文中兼有立法院與真實法院(self):
+        """立法院出現不該遮蔽同文中真實的司法內容。"""
+        text = "立法院修法之際，台北地方法院正審理相關案件。"
+        assert assess_relevance(body=text).relevant is True
