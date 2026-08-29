@@ -2,9 +2,9 @@
 # 新聞事件持續追蹤系統 — 啟動／停止／查看狀態
 #
 #   ./run.sh          啟動全部（資料庫、Redis、Celery、Django）
-#   ./run.sh stop     停止全部
-#   ./run.sh status   查看狀態
+#   ./run.sh status   查看狀態、資料概況與 LLM 餘額
 #   ./run.sh web      只啟動 Django（前景，可看即時日誌）
+#   ./run.sh stop     委派給 ./stop.sh（可再帶 --db、--jobs、--all）
 #
 # 服務未以 systemd 管理（ADR-0010）：資料庫與 Redis 裝在 conda 環境
 # newstrack-db，WSL 亦尚未啟用 systemd。正式的開機自啟見 Scope 8 任務 51。
@@ -102,41 +102,11 @@ start_web() {
 
 # ---------------------------------------------------------------- 停止
 
-stop_all() {
-  conda activate "$APP_ENV"
+# 停止邏輯統一由 stop.sh 提供——兩份實作必然隨時間分歧，
+# 而「該不該停資料庫、該不該停背景作業」這類判斷只該有一個答案。
+stop_all() { ./stop.sh "$@"; }
 
-  local pid; pid="$(web_pid)"
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    # runserver 的 autoreload 會再開一個子程序，需終止整個程序群組
-    kill -TERM -- "-$(ps -o pgid= "$pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
-      || kill -TERM "$pid" 2>/dev/null
-    sleep 2
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
-    ok "Django 已停止"
-  else
-    warn "Django 未在執行"
-  fi
-  rm -f "$PIDFILE"
-
-  if timeout 10 celery -A config control shutdown >/dev/null 2>&1; then
-    ok "Celery worker 已停止"
-  else
-    warn "Celery worker 未回應（可能已停止）"
-  fi
-  [ -f "$LOGDIR/beat.pid" ] && kill "$(cat "$LOGDIR/beat.pid")" 2>/dev/null \
-    && rm -f "$LOGDIR/beat.pid" && ok "Celery beat 已停止"
-
-  # 資料庫與 Redis 刻意不停：它們持有 238,304 篇語料與 36k 向量，
-  # 反覆啟停沒有好處，且背景的向量化作業可能仍在寫入。
-  warn "PostgreSQL 與 Redis 保持執行（如需停止：./run.sh stop-db）"
-}
-
-stop_db() {
-  conda activate "$DB_ENV"
-  redis-cli shutdown nosave 2>/dev/null && ok "Redis 已停止" || warn "Redis 未在執行"
-  pg_ctl -D "$PGDATA" stop >/dev/null 2>&1 && ok "PostgreSQL 已停止" \
-    || warn "PostgreSQL 未在執行"
-}
+stop_db()  { ./stop.sh --db; }
 
 # ---------------------------------------------------------------- 狀態
 
@@ -180,7 +150,7 @@ case "${1:-start}" in
     echo "  後台： http://localhost:$PORT/admin/"
     echo "  日誌： $LOGDIR"
     ;;
-  stop)     stop_all ;;
+  stop)     shift 2>/dev/null; stop_all "$@" ;;
   stop-db)  stop_db ;;
   status)   show_status ;;
   web)
@@ -188,7 +158,7 @@ case "${1:-start}" in
     conda activate "$APP_ENV"
     exec python manage.py runserver "0.0.0.0:$PORT"
     ;;
-  restart)  stop_all; sleep 2; "$0" start ;;
+  restart)  stop_all; sleep 3; "$0" start ;;
   *)
     echo "用法： $0 {start|stop|restart|status|web|stop-db}"
     exit 1

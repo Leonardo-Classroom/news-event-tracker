@@ -36,16 +36,23 @@ python manage.py seed_sources
 ## 執行
 
 ```bash
-./run.sh            # 啟動全部（PostgreSQL、Redis、Celery、Django）
-./run.sh status     # 服務狀態、資料概況、LLM 餘額
-./run.sh stop       # 停止 Django 與 Celery（資料庫保持執行）
-./run.sh web        # 前景執行 Django，可直接看 traceback
+./run.sh                    # 啟動全部（PostgreSQL、Redis、Celery、Django）
+./run.sh status             # 服務狀態、資料概況、LLM 餘額
+./run.sh web                # 前景執行 Django，可直接看 traceback
+
+./stop.sh                   # 停止 Django 與 Celery
+./stop.sh --db              # 一併停止 PostgreSQL 與 Redis
+./stop.sh --jobs            # 一併停止長時間背景作業
+./stop.sh --all             # 全部停止
+
+scripts/run_job.sh embed embed_documents    # 啟動可追蹤的背景作業
 ```
 
 後台： http://localhost:5861/admin/
 
-`stop` 刻意不停 PostgreSQL 與 Redis——它們持有全部語料與向量，
-且背景的向量化作業可能仍在寫入。要停須明確使用 `./run.sh stop-db`。
+`stop.sh` 預設不停 PostgreSQL、Redis 與背景作業——前者持有全部語料與向量，
+後者可能已跑數小時，誤停會浪費那些時間。腳本會偵測背景作業並顯示已執行
+時間，由人決定是否中止。
 
 腳本不使用 `pgrep` / `pkill`：本機曾有程序卡在 D 狀態，
 使任何掃描 `/proc` 的工具永久阻塞（見 ADR-0010），改以 PID 檔管理。
