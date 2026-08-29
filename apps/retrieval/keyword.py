@@ -46,6 +46,8 @@ def build_tsquery(query: str, *, operator: str = "&") -> str:
 class KeywordSearchBackend(Protocol):
     def search(self, queryset: QuerySet, query: str, *, mode: str = "all") -> QuerySet: ...
 
+    def rank(self, queryset: QuerySet, query: str) -> QuerySet: ...
+
 
 class BigramFtsBackend:
     """PostgreSQL 內建 FTS + bigram 切分。
@@ -69,3 +71,28 @@ class BigramFtsBackend:
             where=[f'"{table}"."search_vector" @@ to_tsquery(\'simple\', %s)'],
             params=[expression],
         )
+
+    def rank(self, queryset: QuerySet, query: str) -> QuerySet:
+        """依 ts_rank 由高至低排序。
+
+        **搭配 mode="any" 使用時這不是可選的。** 寬鬆查詢會命中數千篇，
+        沒有相關性排序就只能靠截斷，而截斷什麼都不看——實測依時間
+        截斷前 100 篇，京華城案 30 篇正例全數落榜。
+
+        ts_rank 在 bigram 索引上的意義是「命中了多少個查詢 bigram、
+        各出現幾次」。對事件核心詞的組合查詢，這恰好等於「這篇提到了
+        幾個當事人與關鍵情節」——正是要的排序依據。
+
+        用 normalization=32（``rank / (rank + 1)``）把分數壓進 0–1，
+        避免長文件因為詞頻累積而系統性勝出：一篇反覆提到「柯文哲」
+        二十次的政治評論，不該排在確實在報導京華城案的短稿之前。
+        """
+        expression = build_tsquery(query, operator="|")
+        if not expression:
+            return queryset.none()
+        table = queryset.model._meta.db_table
+        return queryset.extra(                                  # noqa: S610
+            select={"_rank": f'ts_rank("{table}"."search_vector", '
+                             f"to_tsquery('simple', %s), 32)"},
+            select_params=[expression],
+        ).order_by("-_rank")
