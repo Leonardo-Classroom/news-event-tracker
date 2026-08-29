@@ -1,0 +1,31 @@
+{% extends "web/base.html" %}
+{% block title %}待審核{% endblock %}
+{% block content %}
+<div class="page-head"><h1>待審核</h1><span class="sub">{{ events|length }} 個</span></div>
+
+<div class="card">
+  <div class="body" style="font-size:12px;color:var(--text-2);background:var(--warn-bg);border-left:3px solid var(--warn)">
+    <b>審核閘門尚未實作（Scope 6）。</b>
+    規格要求：人工審核僅做形式確認，因此安全性由自動閘門承擔——
+    措辭檢查器為不可繞過的 blocking gate、風險分級自動判定、
+    inferred 因果預設不公開。
+    <b>在這些完成前，任何事件都不應對外公開。</b>
+  </div>
+</div>
+
+<div class="card"><div class="table-scroll"><table>
+  <thead><tr><th>事件</th><th>狀態</th><th>風險</th><th class="num">文件</th><th class="num">建立</th></tr></thead>
+  <tbody>{% for e in events %}<tr>
+    <td><a href="{% url 'web:event_detail' e.slug %}">{{ e.title }}</a></td>
+    <td class="tight"><span class="tag accent">{{ e.get_status_display }}</span></td>
+    <td class="tight">
+      {% if e.risk_tier == 'high' %}<span class="tag danger">高</span>
+      {% elif e.risk_tier == 'medium' %}<span class="tag warn">中</span>
+      {% else %}<span class="tag muted">低</span>{% endif %}</td>
+    <td class="num">{{ e.doc_count }}</td>
+    <td class="num tight">{{ e.created_at|date:"Y-m-d" }}</td>
+  </tr>{% empty %}
+    <tr><td colspan="5" class="empty">沒有待審核的事件</td></tr>
+  {% endfor %}</tbody>
+</table></div></div>
+{% endblock %}

@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.retrieval",
     "apps.events",
     "apps.llm",
+    "apps.web",
 ]
 
 MIDDLEWARE = [
@@ -59,6 +60,11 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
+
+# login_required 預設導向 /accounts/login/，而本專案沒有該路徑——
+# 未設定會讓所有需登入的頁面回 404，而非導向登入頁。
+LOGIN_URL = "/admin/login/"
+LOGIN_REDIRECT_URL = "/"
 WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
@@ -71,6 +77,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "apps.web.context.sidebar",
             ],
         },
     },
@@ -105,6 +112,7 @@ USE_TZ = True          # 全系統以 aware datetime 運作（見 apps.core.cloc
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # ---------------------------------------------------------------- Celery
 # 雙佇列：fetch（高併發 HTTP）與 browser（低併發 Playwright），見 ADR-0007

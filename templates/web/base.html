@@ -1,0 +1,44 @@
+{% load static %}<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}｜新聞事件追蹤</title>
+<link rel="stylesheet" href="{% static 'web/app.css' %}">
+</head>
+<body>
+<div class="shell">
+  <nav class="sidebar">
+    <div class="brand">
+      <b>新聞事件追蹤</b>
+      <span>新聞停了，追蹤沒停</span>
+    </div>
+    <div class="nav">
+      <div class="nav-group">
+        <h6>事件</h6>
+        <a href="{% url 'web:events' %}" class="{% if nav == 'events' %}active{% endif %}">
+          追蹤中<span class="count">{{ nav_counts.tracking }}</span></a>
+        <a href="{% url 'web:review' %}" class="{% if nav == 'review' %}active{% endif %}">
+          待審核<span class="count">{{ nav_counts.review }}</span></a>
+      </div>
+      <div class="nav-group">
+        <h6>資料</h6>
+        <a href="{% url 'web:documents' %}" class="{% if nav == 'documents' %}active{% endif %}">
+          文件<span class="count">{{ nav_counts.documents }}</span></a>
+        <a href="{% url 'web:pipeline' %}" class="{% if nav == 'pipeline' %}active{% endif %}">
+          管線狀態{% if nav_counts.unhealthy %}<span class="count" style="color:var(--danger)">{{ nav_counts.unhealthy }}</span>{% endif %}</a>
+      </div>
+      <div class="nav-group">
+        <h6>系統</h6>
+        <a href="{% url 'web:costs' %}" class="{% if nav == 'costs' %}active{% endif %}">
+          LLM 用量<span class="count">${{ nav_counts.spent }}</span></a>
+        <a href="/admin/">Django 後台</a>
+      </div>
+    </div>
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

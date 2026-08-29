@@ -1,0 +1,56 @@
+{% extends "web/base.html" %}
+{% block title %}管線狀態{% endblock %}
+{% block content %}
+<div class="page-head"><h1>管線狀態</h1></div>
+
+<div class="grid c4">
+  <div class="card"><div class="stat">
+    <div class="label">文件總數</div><div class="value">{{ total|floatformat:0 }}</div>
+    <div class="note">近 24 小時新增 {{ fetched_today }}</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">通過相關性過濾</div><div class="value">{{ relevant|floatformat:0 }}</div>
+    <div class="note">{{ relevant_pct|floatformat:1 }}%</div>
+    <div class="bar" style="margin-top:6px"><i style="width:{{ relevant_pct }}%"></i></div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">已抓內文</div><div class="value">{{ body_pct|floatformat:1 }}<span style="font-size:14px">%</span></div>
+    <div class="note">{{ with_body|floatformat:0 }} 篇</div>
+    <div class="bar" style="margin-top:6px"><i style="width:{{ body_pct }}%"></i></div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">已向量化</div><div class="value">{{ vector_pct|floatformat:1 }}<span style="font-size:14px">%</span></div>
+    <div class="note">{{ vectorised|floatformat:0 }} / {{ relevant|floatformat:0 }} 相關文件</div>
+    <div class="bar" style="margin-top:6px"><i style="width:{{ vector_pct }}%"></i></div></div></div>
+</div>
+
+<div class="card">
+  <h2>來源健康度<span style="font-weight:400;color:var(--text-3)">　— fixture 測試偵測不到「網站改版」，只有連續失敗計數能發現</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th>來源</th><th>型別</th><th>狀態</th><th class="num">輪詢間隔</th>
+      <th class="num">文件</th><th class="num">最新文件</th><th class="num">最後成功</th><th>錯誤</th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td class="tight"><b>{{ row.source.slug }}</b><br><span style="color:var(--text-3)">{{ row.source.name }}</span></td>
+        <td class="tight">{{ row.source.get_type_display }}</td>
+        <td class="tight">
+          {% if row.unhealthy %}<span class="tag danger">連續失敗 {{ row.source.consecutive_failures }}</span>
+          {% elif row.source.consecutive_failures %}<span class="tag warn">失敗 {{ row.source.consecutive_failures }}</span>
+          {% elif not row.source.last_success_at %}<span class="tag muted">從未成功</span>
+          {% else %}<span class="tag ok">正常</span>{% endif %}
+        </td>
+        <td class="num tight">{{ row.interval }} 分{% if row.throttled %}<br><span class="tag warn">已降頻</span>{% endif %}</td>
+        <td class="num">{{ row.docs|floatformat:0 }}</td>
+        <td class="num tight">{{ row.latest|date:"Y-m-d"|default:"—" }}</td>
+        <td class="num tight">
+          {% if row.stale_hours %}{{ row.stale_hours|floatformat:1 }} 小時前{% else %}—{% endif %}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-3)">
+          {{ row.source.last_error|truncatechars:60 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

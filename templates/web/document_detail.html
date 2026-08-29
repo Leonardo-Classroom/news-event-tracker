@@ -1,0 +1,75 @@
+{% extends "web/base.html" %}
+{% block title %}{{ doc.title|truncatechars:30 }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ doc.title }}</h1>
+  <span class="spacer"></span>
+  <a href="{{ doc.url }}" target="_blank" rel="noopener" class="sub">開啟原文 ↗</a>
+</div>
+
+<div class="grid c2" style="grid-template-columns: 1fr 320px">
+  <div class="card">
+    <h2>內文{% if doc.content_class == 'copyrighted' %}<span class="tag muted" style="margin-left:8px">受著作權保護，僅內部檢視</span>{% endif %}</h2>
+    <div class="body body-text">{{ doc.raw_body|default:"（尚未抓取內文）" }}</div>
+  </div>
+  <div>
+    <div class="card"><h2>中繼資料</h2><div class="body">
+      <dl class="kv">
+        <dt>來源</dt><dd>{{ doc.source.name }}（{{ doc.source.slug }}）</dd>
+        <dt>發布</dt><dd class="mono">{{ doc.published_at|date:"Y-m-d H:i"|default:"—" }}</dd>
+        <dt>抓取</dt><dd class="mono">{{ doc.fetched_at|date:"Y-m-d H:i" }}</dd>
+        {% if doc.author %}<dt>記者</dt><dd>{{ doc.author }}</dd>{% endif %}
+        <dt>分類</dt><dd>{{ doc.get_content_class_display }}</dd>
+        <dt>相關性</dt><dd>
+          {% if doc.relevant %}<span class="tag ok">相關</span>
+          {% elif doc.relevant is False %}<span class="tag muted">不相關</span>
+          {% else %}<span class="tag muted">未評估</span>{% endif %}</dd>
+        <dt>向量</dt><dd>{% if doc.embedding_version %}<span class="tag ok mono">{{ doc.embedding_version }}</span>{% else %}<span class="tag muted">無</span>{% endif %}</dd>
+        {% if doc.canonical_of %}<dt>轉載自</dt>
+          <dd><a href="{% url 'web:document_detail' doc.canonical_of.pk %}">{{ doc.canonical_of.title|truncatechars:28 }}</a></dd>{% endif %}
+      </dl>
+    </div></div>
+
+    {% if doc.case_numbers or doc.tax_ids %}
+    <div class="card"><h2>識別碼</h2><div class="body"><div class="chips">
+      {% for n in doc.case_numbers %}<span class="tag accent mono">{{ n }}</span>{% endfor %}
+      {% for n in doc.tax_ids %}<span class="tag muted mono">統編 {{ n }}</span>{% endfor %}
+    </div></div></div>
+    {% endif %}
+
+    {% if events %}
+    <div class="card"><h2>所屬事件</h2><div class="body">
+      {% for e in events %}<div><a href="{% url 'web:event_detail' e.slug %}">{{ e.title }}</a></div>{% endfor %}
+    </div></div>
+    {% endif %}
+
+    {% if doc.relevance_signals.hits %}
+    <div class="card"><h2>相關性命中</h2><div class="body">
+      {% for category, terms in doc.relevance_signals.hits.items %}
+        <div style="margin-bottom:6px">
+          <div style="font-size:11px;color:var(--text-3)">{{ category }}</div>
+          <div class="chips">{% for t in terms %}<span class="tag muted">{{ t }}</span>{% endfor %}</div>
+        </div>
+      {% endfor %}
+    </div></div>
+    {% endif %}
+
+    {% for ex in extractions %}
+    <div class="card"><h2>L1 抽取（{{ ex.schema_kind }}）</h2><div class="body">
+      {% if ex.succeeded %}
+        <div class="body-text" style="font-size:12px">{{ ex.payload.summary }}</div>
+        <dl class="kv" style="margin-top:8px">
+          {% if ex.payload.defendants %}<dt>被告</dt><dd>{% for d in ex.payload.defendants %}{{ d.name }}{% if d.role %}（{{ d.role }}）{% endif %} {% endfor %}</dd>{% endif %}
+          {% if ex.payload.court %}<dt>法院</dt><dd>{{ ex.payload.court }}</dd>{% endif %}
+          {% if ex.payload.stage %}<dt>階段</dt><dd>{{ ex.payload.stage }}</dd>{% endif %}
+          {% if ex.payload.sentence %}<dt>刑度</dt><dd>{{ ex.payload.sentence }}</dd>{% endif %}
+        </dl>
+      {% else %}
+        <span class="tag danger">抽取失敗</span>
+        <div style="font-size:11px;color:var(--text-3);margin-top:4px">{{ ex.error|truncatechars:120 }}</div>
+      {% endif %}
+    </div></div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

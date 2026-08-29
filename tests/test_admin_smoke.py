@@ -73,3 +73,54 @@ class TestDocumentAdmin:
         url = reverse("admin:ingest_document_changelist")
         for params in ({"rel": "1"}, {"vec": "0"}, {"ident": "case"}):
             assert admin_client.get(url, params).status_code == 200
+
+
+class TestWebInterface:
+    """自訂介面的煙霧測試。
+
+    模板錯誤（變數打錯、標籤未閉合、缺 context）只會在瀏覽器出現，
+    單元測試碰不到。這些測試確保每頁至少能渲染。
+    """
+
+    @pytest.mark.parametrize("path", [
+        "/", "/review/", "/documents/", "/pipeline/", "/costs/",
+    ])
+    def test_主要頁面可載入(self, admin_client, path):
+        assert admin_client.get(path).status_code == 200
+
+    def test_文件搜尋不報錯(self, admin_client):
+        assert admin_client.get("/documents/", {"q": "起訴"}).status_code == 200
+
+    def test_未登入導向登入頁而非_404(self, db):
+        """LOGIN_URL 未設定時，login_required 會導向不存在的
+        /accounts/login/ 而回 404——所有頁面看起來都壞掉。"""
+        from django.test import Client
+        response = Client().get("/")
+        assert response.status_code == 302
+        assert "/admin/login/" in response["Location"]
+
+    def test_事件詳情顯示時間線與空白期(self, admin_client, source, db):
+        """空白期的呈現是本系統的核心價值——規格 §2.1 的問題陳述是
+        「報導呈雙峰分布、中間長期空白」，把空白畫出來才看得出填補了沒有。"""
+        import datetime as dt
+        from apps.events.models import (
+            AssignmentMethod, Event, EventDocument, EventStatus,
+        )
+        from apps.ingest.models import Document
+
+        event = Event.objects.create(slug="gap-test", title="空白期測試",
+                                     status=EventStatus.ACTIVE)
+        utc = dt.timezone.utc
+        for i, when in enumerate([dt.datetime(2024, 1, 5, tzinfo=utc),
+                                  dt.datetime(2025, 6, 5, tzinfo=utc)]):
+            doc = Document.objects.create(
+                source=source, url=f"https://gap.test/{i}", title=f"報導{i}",
+                raw_body="內文", content_class=source.content_class,
+                published_at=when,
+            )
+            EventDocument.objects.create(event=event, document=doc,
+                                         method=AssignmentMethod.MANUAL)
+
+        html = admin_client.get(f"/e/{event.slug}/").content.decode()
+        assert "天無報導" in html, "跨越一年半的間隔未被標示為空白期"
+        assert "報導0" in html and "報導1" in html

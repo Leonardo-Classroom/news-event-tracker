@@ -48,7 +48,17 @@ python manage.py seed_sources
 scripts/run_job.sh embed embed_documents    # 啟動可追蹤的背景作業
 ```
 
-後台： http://localhost:5861/admin/
+介面： http://localhost:5861/　　（Django admin 保留在 /admin/ 作為原始資料的修補工具）
+
+介面以**工作**而非資料表組織——Django admin 是「一個模型一個頁面」，
+但實際要做的事（看某個案子進行到哪、這批抓取有沒有問題）都跨越多個模型。
+
+    /            追蹤中的事件
+    /e/<slug>/   單一事件的時間線（核心畫面，會標示報導空白期）
+    /review/     待審核的事件
+    /documents/  文件檢索
+    /pipeline/   管線狀態與來源健康度
+    /costs/      LLM 用量與成本
 
 `stop.sh` 預設不停 PostgreSQL、Redis 與背景作業——前者持有全部語料與向量，
 後者可能已跑數小時，誤停會浪費那些時間。腳本會偵測背景作業並顯示已執行

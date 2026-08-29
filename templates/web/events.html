@@ -1,0 +1,59 @@
+{% extends "web/base.html" %}
+{% block title %}事件{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>事件</h1>
+  <span class="sub">{{ rows|length }} 個</span>
+  <span class="spacer"></span>
+  <form method="get" class="filters" style="margin:0">
+    <select name="status" onchange="this.form.submit()">
+      <option value="">追蹤中與已結案</option>
+      {% for value, label in statuses %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<div class="card">
+<div class="table-scroll">
+<table>
+  <thead><tr>
+    <th>事件</th><th>領域</th><th>狀態</th><th class="num">文件</th>
+    <th class="num">最後進展</th><th>識別特徵</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><a href="{% url 'web:event_detail' row.event.slug %}"><b>{{ row.event.title }}</b></a>
+        {% if row.event.visibility == 'private' %}<span class="tag muted">未公開</span>{% endif %}
+      </td>
+      <td class="tight">{{ row.event.get_domain_display }}</td>
+      <td class="tight">
+        {% if row.event.status == 'active' %}<span class="tag ok">追蹤中</span>
+        {% elif row.event.status == 'dormant' %}<span class="tag warn">沉寂</span>
+        {% elif row.event.status == 'closed' %}<span class="tag muted">已結案</span>
+        {% else %}<span class="tag accent">{{ row.event.get_status_display }}</span>{% endif %}
+      </td>
+      <td class="num">{{ row.event.doc_count }}</td>
+      <td class="num tight">
+        {% if row.event.last_progress_at %}
+          {{ row.event.last_progress_at|date:"Y-m-d" }}
+          <span style="color:var(--text-3)">
+            {% if row.days >= dormant_after %}<span style="color:var(--warn)">{{ row.days }} 天前</span>
+            {% else %}{{ row.days }} 天前{% endif %}
+          </span>
+        {% else %}—{% endif %}
+      </td>
+      <td><div class="chips">
+        {% for term in row.event.core_terms|slice:":5" %}<span class="tag muted">{{ term }}</span>{% endfor %}
+      </div></td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="6" class="empty">沒有符合的事件</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+{% endblock %}

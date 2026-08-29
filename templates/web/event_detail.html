@@ -1,0 +1,99 @@
+{% extends "web/base.html" %}
+{% block title %}{{ event.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ event.title }}</h1>
+  {% if event.status == 'active' %}<span class="tag ok">追蹤中</span>
+  {% elif event.status == 'dormant' %}<span class="tag warn">沉寂</span>
+  {% elif event.status == 'closed' %}<span class="tag muted">已結案</span>
+  {% else %}<span class="tag accent">{{ event.get_status_display }}</span>{% endif %}
+  {% if event.visibility == 'private' %}<span class="tag muted">未公開</span>{% endif %}
+  <span class="spacer"></span>
+  <a href="/admin/events/event/{{ event.pk }}/change/" class="sub">在 admin 編輯</a>
+</div>
+
+<div class="grid c4">
+  <div class="card"><div class="stat">
+    <div class="label">文件</div><div class="value">{{ doc_count }}</div>
+    <div class="note">來自 {{ sources }} 家媒體</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">追蹤跨度</div><div class="value">{{ span_months }}</div>
+    <div class="note">個月</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">有報導的月份</div><div class="value">{{ months_with_news }}</div>
+    <div class="note">佔 {{ span_months }} 個月中</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">無報導月份</div>
+    <div class="value" {% if silent_months %}style="color:var(--warn)"{% endif %}>{{ silent_months }}</div>
+    <div class="note">系統要填補的區間</div></div></div>
+</div>
+
+<div class="grid c2" style="grid-template-columns: 1fr 300px">
+  <div class="card">
+    <h2>時間線</h2>
+    <div class="body">
+      <div class="timeline">
+        {% for item in items %}
+          {% if item.gap %}
+            <div class="tl-gap">
+              ⋯ {{ item.gap }} 天無報導（{{ item.from|date:"Y-m-d" }} → {{ item.to|date:"Y-m-d" }}）
+            </div>
+          {% else %}
+            <div class="tl-item {% if item.doc.content_class == 'public_record' %}official{% endif %}">
+              <div class="tl-date">{{ item.doc.published_at|date:"Y-m-d H:i"|default:"日期不明" }}</div>
+              <div class="tl-title">
+                <a href="{% url 'web:document_detail' item.doc.pk %}">{{ item.doc.title }}</a>
+              </div>
+              <div class="tl-meta">
+                {{ item.doc.source.slug }}
+                {% if item.doc.content_class == 'public_record' %}· <span style="color:var(--accent)">官方紀錄</span>{% endif %}
+                {% if item.link.method != 'import' %}· {{ item.link.get_method_display }}{% endif %}
+                {% if item.doc.case_numbers %}· <span class="mono">{{ item.doc.case_numbers|join:"、" }}</span>{% endif %}
+              </div>
+            </div>
+          {% endif %}
+        {% empty %}
+          <div class="empty">尚無文件</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>事件資訊</h2>
+      <div class="body">
+        <dl class="kv">
+          <dt>領域</dt><dd>{{ event.get_domain_display }}</dd>
+          <dt>風險分級</dt><dd>{{ event.get_risk_tier_display }}</dd>
+          <dt>首次出現</dt><dd class="mono">{{ event.first_seen_at|date:"Y-m-d"|default:"—" }}</dd>
+          <dt>最後進展</dt><dd class="mono">{{ event.last_progress_at|date:"Y-m-d"|default:"—" }}</dd>
+          {% if event.next_key_date %}<dt>下次期日</dt><dd class="mono">{{ event.next_key_date|date:"Y-m-d" }}</dd>{% endif %}
+        </dl>
+      </div>
+    </div>
+
+    {% if event.core_terms %}
+    <div class="card">
+      <h2>識別特徵</h2>
+      <div class="body"><div class="chips">
+        {% for term in event.core_terms %}<span class="tag accent">{{ term }}</span>{% endfor %}
+      </div></div>
+    </div>
+    {% endif %}
+
+    {% if event.case_numbers %}
+    <div class="card">
+      <h2>案號</h2>
+      <div class="body"><div class="chips">
+        {% for n in event.case_numbers %}<span class="tag muted mono">{{ n }}</span>{% endfor %}
+      </div></div>
+    </div>
+    {% endif %}
+
+    {% if event.summary %}
+    <div class="card"><h2>摘要</h2><div class="body body-text">{{ event.summary }}</div></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

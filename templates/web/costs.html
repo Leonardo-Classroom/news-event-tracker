@@ -1,0 +1,60 @@
+{% extends "web/base.html" %}
+{% block title %}LLM 用量{% endblock %}
+{% block content %}
+<div class="page-head"><h1>LLM 用量</h1>
+  <span class="sub">成本於呼叫當下計算並凍結，含當時費率與匯率</span></div>
+
+<div class="grid c4">
+  <div class="card"><div class="stat">
+    <div class="label">已花費</div>
+    <div class="value">${{ spent|floatformat:4 }}</div>
+    <div class="note">NT${{ totals.ntd|floatformat:2 }}</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">剩餘額度</div>
+    <div class="value" {% if remaining <= 0 %}style="color:var(--danger)"{% endif %}>${{ remaining|floatformat:4 }}</div>
+    <div class="note">額度 ${{ approved|floatformat:2 }}</div>
+    <div class="bar" style="margin-top:6px"><i style="width:{% widthratio spent approved 100 %}%"></i></div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">cache 命中率</div>
+    <div class="value">{{ cache_rate|floatformat:1 }}<span style="font-size:14px">%</span></div>
+    <div class="note">命中價低約 31 倍</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">呼叫次數</div><div class="value">{{ totals.calls }}</div>
+    <div class="note">{% if totals.failures %}<span style="color:var(--danger)">失敗 {{ totals.failures }}</span>{% else %}全部成功{% endif %}</div></div></div>
+</div>
+
+<div class="grid c2">
+  <div class="card"><h2>依用途</h2><div class="table-scroll"><table>
+    <thead><tr><th>用途</th><th class="num">次數</th><th class="num">USD</th><th class="num">NTD</th></tr></thead>
+    <tbody>{% for r in by_purpose %}<tr>
+      <td>{{ r.label }}</td><td class="num">{{ r.calls }}</td>
+      <td class="num">${{ r.usd|floatformat:4 }}</td><td class="num">{{ r.ntd|floatformat:2 }}</td>
+    </tr>{% empty %}<tr><td colspan="4" class="empty">尚無用量</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+
+  <div class="card"><h2>依時段<span style="font-weight:400;color:var(--text-3)">　— 離峰半價（台北 09–12、14–18 為尖峰）</span></h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>時段</th><th class="num">次數</th><th class="num">USD</th></tr></thead>
+    <tbody>{% for r in by_peak %}<tr>
+      <td>{{ r.label }}</td><td class="num">{{ r.calls }}</td>
+      <td class="num">${{ r.usd|floatformat:4 }}</td>
+    </tr>{% empty %}<tr><td colspan="3" class="empty">尚無用量</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+</div>
+
+<div class="card"><h2>最近呼叫</h2><div class="table-scroll"><table>
+  <thead><tr><th class="num">時間</th><th>用途</th><th>模型</th>
+    <th class="num">入／出 tokens</th><th class="num">cache</th><th class="num">成本</th><th>狀態</th></tr></thead>
+  <tbody>{% for u in recent %}<tr>
+    <td class="num tight">{{ u.created_at|date:"m-d H:i:s" }}</td>
+    <td class="tight">{{ u.get_purpose_display }}</td>
+    <td class="tight mono" style="font-size:11px">{{ u.model }}</td>
+    <td class="num">{{ u.input_tokens }} / {{ u.output_tokens }}</td>
+    <td class="num">{{ u.cache_hit_rate|floatformat:2 }}</td>
+    <td class="num">${{ u.cost_usd|floatformat:6 }}</td>
+    <td class="tight">{% if u.succeeded %}<span class="tag ok">✓ {{ u.duration_ms }}ms</span>
+      {% else %}<span class="tag danger">✗</span>{% endif %}
+      {% if u.peak %}<span class="tag warn">尖峰</span>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="7" class="empty">尚無呼叫紀錄</td></tr>{% endfor %}</tbody>
+</table></div></div>
+{% endblock %}

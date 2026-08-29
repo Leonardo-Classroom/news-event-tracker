@@ -1,0 +1,56 @@
+{% extends "web/base.html" %}
+{% block title %}文件{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>文件</h1>
+  <span class="sub">{{ page.paginator.count|floatformat:0 }} 筆</span>
+</div>
+
+<form method="get" class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="搜尋標題與內文（走 bigram 全文索引）" style="flex:1;min-width:240px">
+  <select name="source">
+    <option value="">全部來源</option>
+    {% for s in sources %}<option value="{{ s }}" {% if source == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="only">
+    <option value="">全部</option>
+    <option value="relevant" {% if only == 'relevant' %}selected{% endif %}>僅相關</option>
+    <option value="case" {% if only == 'case' %}selected{% endif %}>有案號</option>
+    <option value="vector" {% if only == 'vector' %}selected{% endif %}>已向量化</option>
+  </select>
+  <button class="btn primary">查詢</button>
+</form>
+
+<div class="card">
+<div class="table-scroll">
+<table>
+  <thead><tr><th class="num">發布</th><th>來源</th><th>標題</th><th>標記</th></tr></thead>
+  <tbody>
+  {% for doc in page %}
+    <tr>
+      <td class="num tight">{{ doc.published_at|date:"Y-m-d"|default:"—" }}</td>
+      <td class="tight">{{ doc.source.slug }}</td>
+      <td><a href="{% url 'web:document_detail' doc.pk %}">{{ doc.title }}</a></td>
+      <td class="tight">
+        {% if doc.relevant %}<span class="tag ok">相關</span>{% endif %}
+        {% if doc.case_numbers %}<span class="tag accent">案號</span>{% endif %}
+        {% if doc.canonical_of_id %}<span class="tag warn">轉載</span>{% endif %}
+        {% if doc.content_class == 'public_record' %}<span class="tag accent">公文</span>{% endif %}
+      </td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4" class="empty">沒有符合的文件</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="pager">
+  {% if page.has_previous %}<a class="btn" href="?{% if q %}q={{ q }}&{% endif %}{% if source %}source={{ source }}&{% endif %}{% if only %}only={{ only }}&{% endif %}page={{ page.previous_page_number }}">← 上一頁</a>{% endif %}
+  <span class="spacer"></span>
+  <span class="mono">{{ page.number }} / {{ page.paginator.num_pages }}</span>
+  <span class="spacer"></span>
+  {% if page.has_next %}<a class="btn" href="?{% if q %}q={{ q }}&{% endif %}{% if source %}source={{ source }}&{% endif %}{% if only %}only={{ only }}&{% endif %}page={{ page.next_page_number }}">下一頁 →</a>{% endif %}
+</div>
+{% endblock %}

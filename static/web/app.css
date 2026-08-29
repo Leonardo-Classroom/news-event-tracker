@@ -1,0 +1,270 @@
+/* 新聞事件持續追蹤系統 — 介面樣式
+ *
+ * 設計取向：專業研究工具，非消費性應用。
+ *
+ * 三個決定整體感受的選擇：
+ *
+ * 1. **資訊密度優先。** 這個介面的使用者要在 23.8 萬篇文件與數十個
+ *    事件之間比對、追蹤。留白讓一螢幕能看的東西變少，而「看得到全貌」
+ *    比「好看」重要。行高與內距因此比一般網頁緊。
+ *
+ * 2. **中文內文與數字分開對待。** 中文標題與內文用系統字體並放寬字距
+ *    （繁體字形密，過緊會糊）；數字一律用等寬字體並開啟 tabular-nums，
+ *    使同一欄的數字對齊——比對 238,362 與 238,304 時這是必要的。
+ *
+ * 3. **顏色只用來表達狀態，不用來裝飾。** 追蹤中、沉寂、已結案、
+ *    未公開——這些是使用者真正要一眼分辨的東西。其餘一律中性灰階。
+ */
+
+:root {
+  /* 中性階：以微暖的灰替代純灰，長時間閱讀較不刺眼 */
+  --bg:        #fbfaf9;
+  --surface:   #ffffff;
+  --surface-2: #f5f4f2;
+  --border:    #e3e0dc;
+  --border-strong: #c9c5bf;
+  --text:      #1c1a18;
+  --text-2:    #57534e;
+  --text-3:    #8a847d;
+
+  /* 語意色。刻意低飽和——整頁若有多處鮮色，就沒有一處是醒目的 */
+  --accent:    #1a5fb4;
+  --accent-bg: #eaf1fb;
+  --ok:        #216e39;
+  --ok-bg:     #e8f5ec;
+  --warn:      #8a6100;
+  --warn-bg:   #fdf3e2;
+  --danger:    #a02c2c;
+  --danger-bg: #fbebeb;
+  --muted-bg:  #eeecea;
+
+  --radius: 3px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono",
+          Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+          "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #16151a;
+    --surface:   #1d1c22;
+    --surface-2: #24232a;
+    --border:    #32313a;
+    --border-strong: #46454f;
+    --text:      #eceaf0;
+    --text-2:    #a8a5b0;
+    --text-3:    #75727d;
+    --accent:    #7cb0f0;
+    --accent-bg: #1a2536;
+    --ok:        #6cc48a;
+    --ok-bg:     #16281c;
+    --warn:      #e0b45c;
+    --warn-bg:   #2e2410;
+    --danger:    #f08585;
+    --danger-bg: #331919;
+    --muted-bg:  #26252c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.6 var(--sans);
+  letter-spacing: 0.01em;          /* 繁體字形密，略放寬較清晰 */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 數字一律等寬並對齊——比對長數字時這是必要的，不是美觀問題 */
+.num, td.num, th.num, time, .mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+td.num, th.num { text-align: right; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------------------------------------------------------------- 版面 */
+
+.shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 190px;
+  flex: 0 0 190px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 14px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.brand {
+  padding: 0 14px 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.brand b { display: block; font-size: 13px; letter-spacing: 0.02em; }
+.brand span { color: var(--text-3); font-size: 11px; }
+
+.nav-group { padding: 8px 0; }
+.nav-group > h6 {
+  margin: 0; padding: 4px 14px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--text-3); text-transform: uppercase;
+}
+.nav a {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 14px;
+  color: var(--text-2);
+  border-left: 2px solid transparent;
+}
+.nav a:hover { background: var(--surface-2); text-decoration: none; color: var(--text); }
+.nav a.active {
+  color: var(--text); background: var(--accent-bg);
+  border-left-color: var(--accent); font-weight: 600;
+}
+.nav a .count {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.main { flex: 1; min-width: 0; padding: 18px 22px 60px; }
+
+.page-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 14px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.page-head h1 { margin: 0; font-size: 16px; font-weight: 600; }
+.page-head .sub { color: var(--text-3); font-size: 12px; }
+.page-head .spacer { flex: 1; }
+
+/* ---------------------------------------------------------------- 元件 */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+}
+.card > h2 {
+  margin: 0; padding: 8px 12px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+.card > .body { padding: 12px; }
+
+.grid { display: grid; gap: 12px; }
+.grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .grid.c4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px)  { .grid.c2, .grid.c3, .grid.c4 { grid-template-columns: 1fr; } }
+
+/* 指標塊：數字大、標籤小，一眼可掃 */
+.stat { padding: 10px 12px; }
+.stat .label { font-size: 11px; color: var(--text-3); margin-bottom: 2px; }
+.stat .value {
+  font-family: var(--mono); font-size: 21px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.stat .note { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+/* 表格：緊湊，適合長時間掃視 */
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-size: 11px; font-weight: 600;
+  color: var(--text-3); letter-spacing: 0.04em;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--surface-2); }
+td.tight { white-space: nowrap; }
+.table-scroll { overflow-x: auto; }
+
+/* 狀態標籤 */
+.tag {
+  display: inline-block; padding: 1px 6px; border-radius: 2px;
+  font-size: 11px; line-height: 1.5; white-space: nowrap;
+}
+.tag.ok      { background: var(--ok-bg);     color: var(--ok); }
+.tag.warn    { background: var(--warn-bg);   color: var(--warn); }
+.tag.danger  { background: var(--danger-bg); color: var(--danger); }
+.tag.muted   { background: var(--muted-bg);  color: var(--text-3); }
+.tag.accent  { background: var(--accent-bg); color: var(--accent); }
+
+/* 進度條：用於向量化、覆蓋率等 */
+.bar { height: 4px; background: var(--muted-bg); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* 表單 */
+input[type="search"], input[type="text"], select {
+  font: 13px var(--sans); color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 5px 8px;
+}
+input[type="search"] { width: 100%; }
+input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: var(--accent); }
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.btn {
+  font: 12px var(--sans); padding: 5px 10px; cursor: pointer;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+}
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------------------------------------------------------------- 時間線 */
+
+/* 事件時間線是本系統的核心呈現。縱向軸線 + 節點，
+   讓「中間的空白期」在視覺上真的是空白——那正是本專案要凸顯的東西。 */
+.timeline { position: relative; padding-left: 22px; }
+.timeline::before {
+  content: ""; position: absolute; left: 6px; top: 4px; bottom: 4px;
+  width: 1px; background: var(--border);
+}
+.tl-item { position: relative; padding: 0 0 14px; }
+.tl-item::before {
+  content: ""; position: absolute; left: -19px; top: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border-strong);
+}
+.tl-item.official::before { background: var(--accent); border-color: var(--accent); }
+.tl-date {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tl-title { font-weight: 500; margin: 1px 0 2px; }
+.tl-meta { font-size: 11px; color: var(--text-3); }
+
+/* 空白期：明確標示出來。這是本系統的價值所在——
+   「新聞停了」這件事本身就是資訊，不該被壓縮掉。 */
+.tl-gap {
+  margin: 0 0 14px -22px; padding: 6px 0 6px 22px;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  background: var(--surface-2);
+  font-size: 11px; color: var(--warn);
+}
+
+/* ---------------------------------------------------------------- 其他 */
+
+.empty { padding: 28px; text-align: center; color: var(--text-3); font-size: 12px; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 12px; }
+.pager .spacer { flex: 1; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+.kv dt { color: var(--text-3); white-space: nowrap; }
+.kv dd { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.body-text { font-size: 13px; line-height: 1.8; white-space: pre-wrap; }
