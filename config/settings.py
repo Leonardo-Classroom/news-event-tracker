@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.sitemaps",       # SEO 是一級需求（規格 §4.7）
     "apps.ingest",
+    "apps.llm",
 ]
 
 MIDDLEWARE = [
@@ -108,8 +109,12 @@ CELERY_TIMEZONE = TIME_ZONE
 
 LLM_API_KEY = env("DEEPSEEK_API_KEY", "")
 LLM_BASE_URL = env("LLM_BASE_URL", "https://api.deepseek.com")
-LLM_MODEL_CHEAP = env("LLM_MODEL_CHEAP", "deepseek-chat")      # L1 抽取
-LLM_MODEL_FLAGSHIP = env("LLM_MODEL_FLAGSHIP", "deepseek-reasoner")  # L3/L4
+LLM_MODEL_CHEAP = env("LLM_MODEL_CHEAP", "deepseek-v4-flash")  # L1 抽取
+LLM_MODEL_FLAGSHIP = env("LLM_MODEL_FLAGSHIP", "deepseek-v4-pro")    # L3/L4
+
+# 台幣匯率。每筆用量記錄會存下當時使用的匯率——匯率每天在變，
+# 依當前值重算歷史記錄會讓過去的帳目失真。
+LLM_USD_TO_NTD = env("LLM_USD_TO_NTD", "32.5")
 
 # ---------------------------------------------------------------- Embedding
 # BGE-M3 於 CPU 執行（ADR-0011）。dense 1024 維，以 halfvec 儲存。

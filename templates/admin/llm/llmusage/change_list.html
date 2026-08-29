@@ -1,0 +1,51 @@
+{% extends "admin/change_list.html" %}
+
+{% block result_list %}
+{% if usage_summary %}
+<div style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:16px">
+  <h2 style="margin:0 0 12px;font-size:15px">用量彙總<small style="font-weight:normal;color:#888">（套用目前篩選條件）</small></h2>
+
+  <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:16px">
+    <div><div style="color:#888;font-size:12px">總成本</div>
+      <div style="font-size:22px;font-weight:600">NT${{ usage_summary.totals.ntd|default:0|floatformat:2 }}</div>
+      <div style="color:#888;font-size:12px">US${{ usage_summary.totals.usd|default:0|floatformat:4 }}</div></div>
+    <div><div style="color:#888;font-size:12px">呼叫次數</div>
+      <div style="font-size:22px;font-weight:600">{{ usage_summary.totals.calls|default:0 }}</div>
+      {% if usage_summary.totals.failures %}<div style="color:#cf222e;font-size:12px">失敗 {{ usage_summary.totals.failures }}</div>{% endif %}</div>
+    <div><div style="color:#888;font-size:12px">總 tokens</div>
+      <div style="font-size:22px;font-weight:600">{{ usage_summary.totals.tokens|default:0 }}</div>
+      <div style="color:#888;font-size:12px">出 {{ usage_summary.totals.output|default:0 }}</div></div>
+    <div><div style="color:#888;font-size:12px">cache 命中率</div>
+      <div style="font-size:22px;font-weight:600">{{ usage_summary.cache_hit_rate|floatformat:1 }}<span style="font-size:14px">%</span></div>
+      <div style="color:#888;font-size:12px">命中價低約 30 倍</div></div>
+    <div><div style="color:#888;font-size:12px">平均延遲</div>
+      <div style="font-size:22px;font-weight:600">{{ usage_summary.totals.avg_ms|default:0|floatformat:0 }}<span style="font-size:14px">ms</span></div></div>
+  </div>
+
+  <div style="display:flex;gap:32px;flex-wrap:wrap">
+    <div>
+      <h3 style="font-size:13px;margin:0 0 6px;color:#555">依用途</h3>
+      <table style="font-size:12px"><tr><th style="text-align:left">用途</th><th style="text-align:right">次數</th><th style="text-align:right">NT$</th></tr>
+      {% for row in usage_summary.by_purpose %}<tr>
+        <td>{{ row.label }}</td><td style="text-align:right">{{ row.calls }}</td>
+        <td style="text-align:right">{{ row.ntd|floatformat:2 }}</td></tr>{% endfor %}</table>
+    </div>
+    <div>
+      <h3 style="font-size:13px;margin:0 0 6px;color:#555">依模型</h3>
+      <table style="font-size:12px"><tr><th style="text-align:left">模型</th><th style="text-align:right">次數</th><th style="text-align:right">NT$</th></tr>
+      {% for row in usage_summary.by_model %}<tr>
+        <td>{{ row.model }}</td><td style="text-align:right">{{ row.calls }}</td>
+        <td style="text-align:right">{{ row.ntd|floatformat:2 }}</td></tr>{% endfor %}</table>
+    </div>
+    <div>
+      <h3 style="font-size:13px;margin:0 0 6px;color:#555">依時段<small style="font-weight:normal;color:#888">（離峰半價）</small></h3>
+      <table style="font-size:12px"><tr><th style="text-align:left">時段</th><th style="text-align:right">次數</th><th style="text-align:right">NT$</th></tr>
+      {% for row in usage_summary.by_peak %}<tr>
+        <td>{{ row.label }}</td><td style="text-align:right">{{ row.calls }}</td>
+        <td style="text-align:right">{{ row.ntd|floatformat:2 }}</td></tr>{% endfor %}</table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}
