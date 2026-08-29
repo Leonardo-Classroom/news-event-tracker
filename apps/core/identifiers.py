@@ -18,6 +18,7 @@ from .dates import to_halfwidth
 __all__ = [
     "CaseNumber",
     "parse_case_number",
+    "extract_case_numbers",
     "normalize_case_number",
     "is_valid_tax_id",
     "extract_tax_ids",
@@ -88,6 +89,27 @@ def normalize_case_number(text: str | None) -> str | None:
     """把任意寫法的案號轉為正規字串。找不到時回傳 ``None``。"""
     case = parse_case_number(text)
     return case.canonical() if case else None
+
+
+def extract_case_numbers(text: str | None) -> list[str]:
+    """抽出文中**所有**案號的正規形式，去重且保持出現順序。
+
+    一篇報導常同時提及多個審級的案號（如一審與二審），
+    只取第一個會讓跨審級的事件歸屬失效。
+    """
+    if not text:
+        return []
+
+    seen: dict[str, None] = {}
+    for match in _CASE_PATTERN.finditer(to_halfwidth(str(text))):
+        category = match.group("category").translate(_CATEGORY_NORMALIZE)
+        case = CaseNumber(
+            year=int(match.group("year")),
+            category=category,
+            number=int(match.group("number")),
+        )
+        seen.setdefault(case.canonical(), None)
+    return list(seen)
 
 
 # ---------------------------------------------------------------- 統一編號

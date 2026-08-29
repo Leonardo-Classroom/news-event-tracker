@@ -6,6 +6,7 @@ ADR-0001 把「識別碼精確比對」當成事件歸屬的第一優先路徑�
 import pytest
 
 from apps.core.identifiers import (
+    extract_case_numbers,
     CaseNumber,
     extract_tax_ids,
     is_valid_tax_id,
@@ -126,3 +127,41 @@ class TestNormalizeTenderId:
     def test_空輸入(self):
         assert normalize_tender_id(None) is None
         assert normalize_tender_id("   ") is None
+
+
+class TestExtractCaseNumbers:
+    """抽出文中所有案號。
+
+    一篇報導常同時提及多個審級的案號（一審、二審、更審），
+    只取第一個會讓跨審級的事件歸屬失效——而跨審級追蹤正是本系統的核心。
+    """
+
+    def test_抽出多個案號(self):
+        text = ("本案一審為臺灣臺北地方法院111年度金重訴字第123號，"
+                "二審為臺灣高等法院113年度上訴字第456號。")
+        assert extract_case_numbers(text) == [
+            "111年度金重訴字第123號", "113年度上訴字第456號",
+        ]
+
+    def test_去重且保持順序(self):
+        text = "111年度易字第1號…（略）…如111年度易字第1號所載…112年度訴字第2號"
+        assert extract_case_numbers(text) == [
+            "111年度易字第1號", "112年度訴字第2號",
+        ]
+
+    def test_不同寫法歸為同一案號(self):
+        """全形、空白、省略「度」字都要收斂到同一個正規形式，
+        否則同一案件會被當成兩個。"""
+        text = "111 年度 易 字第 1 號，另見 １１１年易字第１號"
+        assert extract_case_numbers(text) == ["111年度易字第1號"]
+
+    def test_臺台統一(self):
+        text = "110年度臺上字第55號與110年度台上字第55號"
+        assert extract_case_numbers(text) == ["110年度台上字第55號"]
+
+    @pytest.mark.parametrize("raw", [None, "", "沒有案號的報導"])
+    def test_無案號回傳空陣列(self, raw):
+        assert extract_case_numbers(raw) == []
+
+    def test_不誤把日期當案號(self):
+        assert extract_case_numbers("民國111年3月5日宣判") == []

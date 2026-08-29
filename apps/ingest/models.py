@@ -6,12 +6,14 @@
 """
 from __future__ import annotations
 
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
 from django.db.models import F, Func, Value
 from django.utils import timezone
 
+from apps.core.identifiers import extract_case_numbers, extract_tax_ids
 from apps.core.text.bigram import to_tsvector_input
 from apps.core.text.simhash import simhash
 
@@ -173,6 +175,20 @@ class Document(models.Model):
         help_text="若本文為轉載，指向首發版本",
     )
 
+    # --- 識別碼（ADR-0001）---
+    # **以規則抽取，不呼叫 LLM。** 案號與統編有明確格式，
+    # 規則抽取既免費又能立刻覆蓋全部語料——不必等 L1 抽取完成。
+    # 這一點很重要：ADR-0005 把識別碼精確比對列為事件歸屬的第一優先，
+    # 若要等 LLM 抽取才有識別碼，歸屬就得跟著等。
+    case_numbers = ArrayField(
+        models.CharField(max_length=64), default=list, blank=True,
+        help_text="正規化後的裁判書案號，如「111年度金重訴字第123號」",
+    )
+    tax_ids = ArrayField(
+        models.CharField(max_length=8), default=list, blank=True,
+        help_text="通過檢查碼驗證的統一編號",
+    )
+
     # --- 相關性過濾（ADR-0009）---
     # null 表示尚未評估。刻意用三態而非布林預設 False——
     # 「還沒判斷」與「判斷為不相關」是兩件事，混為一談會讓
@@ -198,6 +214,10 @@ class Document(models.Model):
         ordering = ["-published_at", "-fetched_at"]
         indexes = [
             GinIndex(fields=["search_vector"], name="document_search_gin"),
+            # 陣列欄位用 GIN：查「哪些文件含此案號」是事件歸屬的
+            # 第一優先路徑，必須是索引查詢而非全表掃描
+            GinIndex(fields=["case_numbers"], name="document_case_gin"),
+            GinIndex(fields=["tax_ids"], name="document_taxid_gin"),
             models.Index(fields=["source", "-published_at"], name="document_source_pub"),
             models.Index(fields=["content_class"], name="document_content_class"),
         ]
@@ -216,6 +236,8 @@ class Document(models.Model):
         combined = f"{self.title}\n{self.raw_body}"
         self.simhash = to_signed64(simhash(combined))
         self.search_text = to_tsvector_input(combined)
+        self.case_numbers = extract_case_numbers(combined)
+        self.tax_ids = extract_tax_ids(combined)
 
     @property
     def simhash_unsigned(self) -> int | None:
@@ -223,7 +245,7 @@ class Document(models.Model):
 
     #: 衍生欄位的來源；其中任一變動就必須重算
     DERIVED_SOURCES = frozenset({"title", "raw_body"})
-    DERIVED_FIELDS = ("simhash", "search_text")
+    DERIVED_FIELDS = ("simhash", "search_text", "case_numbers", "tax_ids")
 
     def save(self, *args, **kwargs):
         if not self.content_class:
