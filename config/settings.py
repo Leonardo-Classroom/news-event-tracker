@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.ingest",
     "apps.extract",
     "apps.retrieval",
+    "apps.events",
     "apps.llm",
 ]
 

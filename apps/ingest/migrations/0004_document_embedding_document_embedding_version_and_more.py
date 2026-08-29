@@ -12,6 +12,14 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # extension 必須先於 halfvec 欄位建立。測試資料庫每次重建、
+        # 不繼承主庫的 extension，少了這一步所有向量測試都會失敗，
+        # 而錯誤訊息「type "halfvec" does not exist」指向型別，
+        # 不會讓人立刻想到是 extension 沒裝。
+        migrations.RunSQL(
+            sql="CREATE EXTENSION IF NOT EXISTS vector;",
+            reverse_sql="-- 刻意不移除：其他資料表可能仍依賴",
+        ),
         migrations.AddField(
             model_name='document',
             name='embedding',
