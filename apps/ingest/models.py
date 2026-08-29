@@ -113,6 +113,20 @@ class DocumentQuerySet(models.QuerySet):
     def pending_relevance(self):
         return self.filter(relevant__isnull=True).exclude(raw_body="")
 
+    def pending_extraction(self, prompt_version: str = ""):
+        """已判定相關、但尚未以指定 prompt 版本抽取過的文件。
+
+        以 prompt 版本為條件而非單純「有無抽取結果」——prompt 改動後
+        需要重抽，而那時舊結果仍然存在。
+        """
+        queryset = self.relevant().exclude(raw_body="")
+        if prompt_version:
+            return queryset.exclude(
+                extractions__prompt_version=prompt_version,
+                extractions__succeeded=True,
+            )
+        return queryset.filter(extractions__isnull=True)
+
     def public_records(self):
         return self.filter(content_class=ContentClass.PUBLIC_RECORD)
 
