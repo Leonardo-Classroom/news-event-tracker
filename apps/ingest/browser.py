@@ -113,6 +113,33 @@ class BrowserFetcher:
         except Exception as exc:                    # noqa: BLE001
             raise FetchError(f"{url}: {exc}") from exc
 
+    def run_in_page(self, fn):
+        """在瀏覽器執行緒中執行 ``fn(page)``，並保證頁面被關閉。
+
+        給需要互動的情境使用——填表單、按鈕、讀取 iframe——這些無法
+        以單純的 ``get()`` 表達。
+
+        **必須透過此方法，不可從外部直接取用 ``_context`` 或 ``_executor``。**
+        Playwright 的 sync API 以 greenlet 實作，其狀態綁在建立它的執行緒；
+        從外部跨執行緒建立與使用頁面會觸發
+        「greenlet.error: Cannot switch to a different thread」，
+        而該錯誤的訊息完全指不出真正的原因。
+        """
+        def _wrapped():
+            page = self._context.new_page()
+            try:
+                return fn(page)
+            finally:
+                try:
+                    page.close()
+                except Exception:               # noqa: BLE001
+                    pass
+
+        try:
+            return self._executor.submit(_wrapped).result()
+        except Exception as exc:                # noqa: BLE001
+            raise FetchError(str(exc)) from exc
+
     # ---------------------------------------------------------------- 內部
 
     def _goto(self, page, url: str, opts: RenderOptions, timeout: float) -> None:
