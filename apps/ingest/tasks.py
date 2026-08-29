@@ -150,3 +150,39 @@ def browser_poll_source(source_id: int) -> dict:
         "updated": result.updated,
         "error": result.error,
     }
+
+
+@shared_task(
+    name="apps.ingest.tasks.fill_bodies",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=600,
+    time_limit=660,
+)
+def fill_bodies(limit: int = 100) -> dict:
+    """補齊缺內文的文件。
+
+    全文是 L1 抽取、向量檢索、轉載歸併與時間線的共同前提——
+    清單頁只給標題，實測標題僅約 21 個 bigram，不足以支撐任何後續處理。
+    冪等：已有內文者直接跳過。
+    """
+    from apps.ingest.services import fill_missing_bodies
+
+    result = fill_missing_bodies(limit=limit)
+    return {"attempted": result.attempted, "filled": result.filled,
+            "failed": result.failed}
+
+
+@shared_task(
+    name="apps.ingest.tasks.dedupe_recent_documents",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=900,
+    time_limit=960,
+)
+def dedupe_recent_documents(hours: int = 72) -> dict:
+    """歸併近期的轉載（ADR-0012）。冪等：已歸併者會被跳過。"""
+    from apps.ingest.dedup import dedupe_recent
+
+    result = dedupe_recent(hours=hours)
+    return {"examined": result.examined, "linked": result.linked}
