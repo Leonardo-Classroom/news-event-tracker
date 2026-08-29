@@ -99,3 +99,20 @@ class LlmUsage(models.Model):
         """
         total = self.input_tokens
         return self.cached_input_tokens / total if total else 0.0
+
+
+class LlmBudgetGrant(models.Model):
+    """一次額度追加。額度為所有 grant 的累計值。"""
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    amount_usd = models.DecimalField(max_digits=10, decimal_places=4)
+    granted_by = models.CharField(max_length=64, blank=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "LLM 額度追加"
+        verbose_name_plural = "LLM 額度追加"
+
+    def __str__(self) -> str:
+        return f"+US${self.amount_usd} @ {self.created_at:%Y-%m-%d %H:%M}"

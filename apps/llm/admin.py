@@ -15,7 +15,7 @@ from django.db.models import Avg, Count, Q, Sum
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from apps.llm.models import LlmUsage
+from apps.llm.models import LlmBudgetGrant, LlmUsage
 
 
 class PeakFilter(admin.SimpleListFilter):
@@ -155,3 +155,39 @@ class LlmUsageAdmin(admin.ModelAdmin):
         return response
 
     change_list_template = "admin/llm/llmusage/change_list.html"
+
+
+@admin.register(LlmBudgetGrant)
+class LlmBudgetGrantAdmin(admin.ModelAdmin):
+    """額度追加紀錄。
+
+    可在後台新增——這是「核准」這個動作本身，需要有人明確執行。
+    但不可修改或刪除：追加是既成事實，事後改動會讓帳目失去意義。
+    """
+
+    list_display = ("created_at", "amount_usd", "granted_by", "note", "running_total")
+    readonly_fields = ("created_at",)
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="當時累計額度")
+    def running_total(self, obj):
+        total = (LlmBudgetGrant.objects
+                 .filter(created_at__lte=obj.created_at)
+                 .aggregate(t=Sum("amount_usd"))["t"] or Decimal("0"))
+        return f"US${total:.2f}"
+
+    def changelist_view(self, request, extra_context=None):
+        from apps.llm.budget import approved_usd, remaining_usd, spent_usd
+
+        spent, approved, left = spent_usd(), approved_usd(), remaining_usd()
+        extra_context = extra_context or {}
+        extra_context["title"] = (
+            f"LLM 額度追加　—　已花費 US${spent:.4f} / 額度 US${approved:.2f}"
+            f"　剩餘 US${left:.4f}"
+        )
+        return super().changelist_view(request, extra_context)

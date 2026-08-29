@@ -8,6 +8,16 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# 載入 .env（不進版控）。刻意不引入額外套件——只需最基本的解析。
+_env_file = BASE_DIR / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key, _, _value = _line.partition("=")
+        os.environ.setdefault(_key.strip(), _value.strip())
+
 
 def env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
@@ -115,6 +125,11 @@ LLM_MODEL_FLAGSHIP = env("LLM_MODEL_FLAGSHIP", "deepseek-v4-pro")    # L3/L4
 # 台幣匯率。每筆用量記錄會存下當時使用的匯率——匯率每天在變，
 # 依當前值重算歷史記錄會讓過去的帳目失真。
 LLM_USD_TO_NTD = env("LLM_USD_TO_NTD", "32.5")
+
+# 支出上限（美元）。累計花費達此額度時所有 LLM 呼叫會被拒絕，
+# 直到以 `manage.py llm_budget --approve` 明確追加。
+# 閘門設在 LLMProvider 內部，呼叫端無法繞過。
+LLM_BUDGET_INCREMENT_USD = env("LLM_BUDGET_INCREMENT_USD", "5.00")
 
 # ---------------------------------------------------------------- Embedding
 # BGE-M3 於 CPU 執行（ADR-0011）。dense 1024 維，以 halfvec 儲存。
