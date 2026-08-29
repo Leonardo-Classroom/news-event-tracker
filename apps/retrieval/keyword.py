@@ -60,7 +60,12 @@ class BigramFtsBackend:
         expression = build_tsquery(query, operator="&" if mode == "all" else "|")
         if not expression:
             return queryset.none()
+        # **欄位必須限定表名。** Document 有指向自身的 canonical_of，
+        # 任何 join（如 admin 的 list_select_related）都會讓未限定的
+        # search_vector 變成 "column reference is ambiguous"——
+        # 而該錯誤只在有 join 時出現，單獨查詢完全正常。
+        table = queryset.model._meta.db_table
         return queryset.extra(                                  # noqa: S610
-            where=["search_vector @@ to_tsquery('simple', %s)"],
+            where=[f'"{table}"."search_vector" @@ to_tsquery(\'simple\', %s)'],
             params=[expression],
         )
