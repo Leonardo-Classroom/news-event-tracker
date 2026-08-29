@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from django.contrib.postgres.fields import ArrayField
+from pgvector.django import HalfVectorField, HnswIndex
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
@@ -196,6 +197,14 @@ class Document(models.Model):
     relevant = models.BooleanField(null=True, blank=True, db_index=True)
     relevance_signals = models.JSONField(default=dict, blank=True)
 
+    # --- 向量檢索（ADR-0004、ADR-0011）---
+    # halfvec（float16）而非 vector（float32）：儲存與 HNSW 索引記憶體減半，
+    # 對召回率的影響可忽略。以 100 萬文件估算，向量本身約 2GB。
+    embedding = HalfVectorField(dimensions=1024, null=True, blank=True)
+    #: 產生此向量的模型版本。換模型時可辨識哪些需重算，支援漸進式遷移——
+    #: 沒有它，換模型就只能全部重算，或含糊地混用兩種向量空間。
+    embedding_version = models.CharField(max_length=32, blank=True, db_index=True)
+
     # --- 關鍵字檢索（ADR-0001：bigram + PostgreSQL 內建 FTS）---
     # 切分在 Python 完成（bigram 邏輯無法以 SQL 乾淨表達），
     # tsvector 轉換與索引交給資料庫。
@@ -218,6 +227,15 @@ class Document(models.Model):
             # 第一優先路徑，必須是索引查詢而非全表掃描
             GinIndex(fields=["case_numbers"], name="document_case_gin"),
             GinIndex(fields=["tax_ids"], name="document_taxid_gin"),
+            # HNSW 而非 IVFFlat：資料持續新增且永不刪除，IVFFlat 的分群
+            # 在建索引時固定，新增資料若分布偏移則召回率逐漸衰退、需定期重建；
+            # HNSW 支援增量插入且召回率較高（ADR-0004）。
+            HnswIndex(
+                name="document_embedding_hnsw",
+                fields=["embedding"],
+                m=16, ef_construction=64,
+                opclasses=["halfvec_cosine_ops"],
+            ),
             models.Index(fields=["source", "-published_at"], name="document_source_pub"),
             models.Index(fields=["content_class"], name="document_content_class"),
         ]
