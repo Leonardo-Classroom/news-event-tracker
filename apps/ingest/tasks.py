@@ -1,0 +1,152 @@
+"""Celery 任務。
+
+雙佇列（ADR-0007）：
+  fetch    — 輕量 HTTP，高併發
+  browser  — Playwright，低併發 + max-tasks-per-child
+
+任務只負責排程、重試與逾時；實際邏輯在 services.py，
+以便用 medium 測試直接驗證而不需要跑起 worker。
+
+所有任務必須冪等：``acks_late=True`` 表示被硬殺的任務會重新入列並重跑。
+這取代了既有爬蟲的 done_urls.json 續爬機制——檔案狀態在多 worker
+下有競爭條件，資料庫的唯一約束沒有。
+"""
+from __future__ import annotations
+
+import logging
+
+from celery import shared_task
+
+from apps.ingest.browser import RenderOptions
+from apps.ingest.models import Source, SourceType
+from apps.ingest.services import ingest_source, should_poll
+
+logger = logging.getLogger(__name__)
+
+#: 各需渲染站台的行為差異。放設定而非程式分支，新增站台只需加一筆。
+BROWSER_SOURCES: dict[str, tuple[str, str, RenderOptions]] = {
+    # slug: (adapter, 清單頁網址, 渲染選項)
+    "udn": (
+        "udn",
+        "https://udn.com/news/breaknews/1",
+        RenderOptions(scrolls=3, wait_for_selector="a[href*='/news/story/']"),
+    ),
+    "chinatimes": (
+        "chinatimes",
+        "https://www.chinatimes.com/realtimenews/?chdtv",
+        RenderOptions(cloudflare=True, wait_for_selector="h3 a"),
+    ),
+}
+
+
+@shared_task(
+    name="apps.ingest.tasks.poll_source",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=300,
+    time_limit=360,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
+    """抓取單一來源。冪等——重跑只會 upsert 既有文件。"""
+    source = Source.objects.get(pk=source_id)
+    result = ingest_source(source, adapter_slug=adapter_slug)
+    logger.info(
+        "來源 %s：取得 %d、新增 %d、更新 %d、略過 %d%s",
+        result.source_slug, result.fetched, result.created,
+        result.updated, result.skipped,
+        f"、錯誤 {result.error}" if result.error else "",
+    )
+    return {
+        "source": result.source_slug,
+        "fetched": result.fetched,
+        "created": result.created,
+        "updated": result.updated,
+        "error": result.error,
+    }
+
+
+@shared_task(
+    name="apps.ingest.tasks.poll_due_sources",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=60,
+)
+def poll_due_sources() -> dict:
+    """派發所有到期的來源。由 Celery Beat 定期呼叫。
+
+    只做派發不做抓取，讓單一來源的失敗或緩慢不影響其他來源。
+    """
+    dispatched = []
+    for source in Source.objects.filter(enabled=True):
+        if not should_poll(source):
+            continue
+        # 依來源型別派往對應佇列：Playwright 任務的記憶體與時間特性
+        # 與輕量 HTTP 差異極大，混在同一佇列會互相拖累（ADR-0007）。
+        if source.type == SourceType.NEWS_SCRAPE:
+            browser_poll_source.delay(source.pk)
+        else:
+            poll_source.delay(source.pk)
+        dispatched.append(source.slug)
+    logger.info("派發 %d 個到期來源：%s", len(dispatched), ", ".join(dispatched) or "無")
+    return {"dispatched": dispatched}
+
+
+@shared_task(
+    name="apps.ingest.tasks.browser_poll_source",
+    queue="browser",
+    acks_late=True,
+    soft_time_limit=600,
+    time_limit=720,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 2},
+)
+def browser_poll_source(source_id: int) -> dict:
+    """以 Playwright 渲染後抓取清單頁。
+
+    給沒有可用 RSS 的站台使用——實測聯合新聞網的 RSS 內容全空、
+    中時新聞網的 RSS 全部 404，而它們是既有語料最大的兩個來源。
+
+    瀏覽器由 browser_pool 管理，其生命週期綁在 Celery 子程序上；
+    worker 需以 ``--max-tasks-per-child=20`` 啟動，讓子程序定期重生
+    以避免瀏覽器累積劣化（ADR-0007）。
+
+    逾時設定較 fetch 佇列寬鬆：Cloudflare 挑戰最長需 35 秒，
+    加上滾動與渲染，單次可達數分鐘。
+    """
+    from apps.ingest.browser_pool import get_browser
+
+    source = Source.objects.get(pk=source_id)
+    if source.slug not in BROWSER_SOURCES:
+        raise ValueError(f"來源 {source.slug} 未登記於 BROWSER_SOURCES")
+
+    adapter_slug, list_url, options = BROWSER_SOURCES[source.slug]
+
+    # 清單頁網址與 base_url 不同，暫存到 feed_url 供 ingest_source 使用
+    original_feed_url = source.feed_url
+    source.feed_url = list_url
+    try:
+        result = ingest_source(
+            source,
+            fetcher=get_browser(),
+            adapter_slug=adapter_slug,
+            render_options=options,
+        )
+    finally:
+        source.feed_url = original_feed_url
+
+    logger.info(
+        "來源 %s（瀏覽器）：取得 %d、新增 %d、更新 %d%s",
+        result.source_slug, result.fetched, result.created, result.updated,
+        f"、錯誤 {result.error}" if result.error else "",
+    )
+    return {
+        "source": result.source_slug,
+        "fetched": result.fetched,
+        "created": result.created,
+        "updated": result.updated,
+        "error": result.error,
+    }

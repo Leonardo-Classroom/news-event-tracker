@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 環境與機密
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 資料庫與執行時產物
+*.sqlite3
+/staticfiles/
+/media/
+
+# 本機資料目錄（PostgreSQL 資料在 ~/newstrack/pgdata，本就不在專案內）
+/data/
+/logs/
+
+# 編輯器與作業系統
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

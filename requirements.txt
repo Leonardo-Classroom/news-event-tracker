@@ -1,0 +1,42 @@
+# 新聞事件持續追蹤系統 — conda 環境 leo3.10
+# 安裝：conda activate leo3.10 && pip install -r requirements.txt
+
+# --- Web ---
+Django==5.2.13
+gunicorn==23.0.0
+django-environ==0.11.2
+
+# --- 資料庫 ---
+psycopg[binary]==3.2.3
+pgvector==0.3.6
+
+# --- 任務佇列 (ADR-0007) ---
+celery==5.4.0
+redis==5.2.1
+django-celery-beat==2.7.0
+
+# --- 採集 (L0) ---
+httpx==0.27.2
+feedparser==6.0.11
+playwright==1.55.0
+selectolax==0.3.27          # 快速 HTML 解析（靜態頁，不需瀏覽器時用）
+
+# --- Embedding (ADR-0004) ---
+FlagEmbedding==1.3.4        # BGE-M3
+sentence-transformers==5.6.1
+torch==2.9.1
+
+# --- 事件偵測 (ADR-0005) ---
+hdbscan==0.8.40
+umap-learn==0.5.7
+numpy==1.26.4
+scikit-learn==1.5.2
+
+# --- LLM (ADR-0002) ---
+openai==1.59.0              # DeepSeek 相容 OpenAI SDK 介面，經 LLMProvider 抽象層使用
+
+# --- 測試 ---
+pytest==8.3.4
+pytest-django==4.9.0
+pytest-cov==6.0.0
+time-machine==2.16.0        # Clock 接縫的輔助（僅用於少數整合測試）
