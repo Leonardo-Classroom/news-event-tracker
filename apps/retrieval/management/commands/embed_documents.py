@@ -30,10 +30,18 @@ class Command(BaseCommand):
         parser.add_argument("--limit", type=int, default=0)
         parser.add_argument("--batch", type=int, default=64,
                             help="每批送入模型的文件數")
+        parser.add_argument("--ids", default="",
+                            help="只處理指定 id（逗號分隔）。用於優先向量化"
+                                 "特定文件（如標註集），不必等全量批次跑到它們——"
+                                 "全量以 id 遞增順序處理，較新的文件（通常 id 較大）"
+                                 "要等數小時才輪到。")
 
     def handle(self, *args, **options):
         queryset = Document.objects.exclude(raw_body="")
-        if not options["all"]:
+        if options["ids"]:
+            ids = [int(x) for x in options["ids"].split(",") if x.strip()]
+            queryset = queryset.filter(pk__in=ids)
+        elif not options["all"]:
             queryset = queryset.relevant()
         if not options["redo"]:
             # 版本不符者也要重算——換模型後舊向量不可與新向量比對

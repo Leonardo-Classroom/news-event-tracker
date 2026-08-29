@@ -103,6 +103,24 @@ class EventQuerySet(models.QuerySet):
     def awaiting_review(self):
         return self.filter(status=EventStatus.DRAFT)
 
+    def maybe_due_for_official_check(self, now=None):
+        """SQL 端的**寬鬆**預篩——只用最短的檢查間隔（1 天）排除掉明顯
+        還沒到期的事件，精確判斷（依狀態各自的間隔）交給
+        ``Event.due_for_official_check()`` 在 Python 端做第二輪過濾。
+
+        分兩階段是因為精確間隔依狀態而異（active/dormant 官方源皆
+        1 天、closed 90 天），若要在單一 SQL 查詢裡表達完整規則，
+        條件會變得難以驗證是否正確；而事件數量級（數十到數百）
+        遠不到需要在資料庫端做到位的規模。
+        """
+        now = now or timezone.now()
+        return self.filter(
+            status__in=[EventStatus.ACTIVE, EventStatus.DORMANT, EventStatus.CLOSED],
+        ).filter(
+            models.Q(last_official_check_at__isnull=True)
+            | models.Q(last_official_check_at__lte=now - dt.timedelta(days=1))
+        )
+
 
 class Event(models.Model):
     """一個被追蹤的事件。"""
@@ -142,6 +160,12 @@ class Event(models.Model):
     last_progress_at = models.DateTimeField(null=True, blank=True, db_index=True)
     next_key_date = models.DateField(null=True, blank=True,
                                      help_text="下次開庭或關鍵期日")
+
+    #: 上次「嘗試檢查」官方源的時間，與 last_progress_at 分開記錄——
+    #: 後者只在真的有新進展時更新，前者每次檢查（不論有無新進展）
+    #: 都要更新，否則「今天已經查過但沒有新東西」會被誤判為還沒查過，
+    #: 導致同一天對官方源重複發出請求（任務 27）。
+    last_official_check_at = models.DateTimeField(null=True, blank=True)
 
     first_seen_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -293,6 +317,27 @@ class Event(models.Model):
             return 90 if official_source else None
         return None
 
+    def due_for_official_check(self, now: dt.datetime | None = None) -> bool:
+        """是否該對此事件的官方源做一次檢查（任務 27）。
+
+        用 ``last_official_check_at`` 而非 ``last_progress_at`` 判斷
+        「上次查過是什麼時候」——兩者意義不同：檢查了但沒查到新東西，
+        ``last_progress_at`` 不會動，若拿它當「上次檢查時間」的依據，
+        會被誤判成「一直沒查過」而每次排程都重新發request。
+        """
+        interval = self.check_interval_days(official_source=True)
+        if interval is None:
+            return False
+        if self.last_official_check_at is None:
+            return True
+        now = now or timezone.now()
+        return (now - self.last_official_check_at).days >= interval
+
+    def record_official_check(self, moment: dt.datetime, *, save: bool = True) -> None:
+        self.last_official_check_at = moment
+        if save:
+            self.save(update_fields=["last_official_check_at", "updated_at"])
+
 
 class EventAlias(models.Model):
     """事件的別名與俗稱。
@@ -322,6 +367,7 @@ class AssignmentMethod(models.TextChoices):
     LLM = "llm", "LLM 判定"
     MANUAL = "manual", "人工指定"
     IMPORT = "import", "標註集匯入"
+    CLUSTER = "cluster", "自動叢集（新事件候選）"
 
 
 class EventDocument(models.Model):
