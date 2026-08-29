@@ -10,7 +10,7 @@ from django.db import models
 
 #: prompt 或 schema 有實質變動時必須遞增。
 #: 這個字串會存進每一筆抽取結果，是回溯品質變化的唯一依據。
-PROMPT_VERSION = "2026-08-30.1"
+PROMPT_VERSION = "2026-08-30.2"
 
 
 class Extraction(models.Model):

@@ -42,6 +42,10 @@ class LlmError(Exception):
 class LlmResponse:
     text: str
     model: str
+    #: 供應商回報的結束原因。"length" 表示撞上 max_tokens 而被截斷——
+    #: 若不檢查此欄位，截斷的 JSON 會以「解析失敗」的面貌出現，
+    #: 把問題指向錯誤的方向。
+    finish_reason: str = ""
     cached_input_tokens: int = 0
     uncached_input_tokens: int = 0
     output_tokens: int = 0
@@ -205,9 +209,11 @@ class DeepSeekProvider(_RecordingProvider):
             uncached = getattr(usage, "prompt_cache_miss_tokens",
                                max(0, usage.prompt_tokens - cached))
 
+        choice = completion.choices[0]
         return LlmResponse(
-            text=completion.choices[0].message.content or "",
+            text=choice.message.content or "",
             model=model,
+            finish_reason=getattr(choice, "finish_reason", "") or "",
             cached_input_tokens=cached,
             uncached_input_tokens=uncached,
             output_tokens=getattr(usage, "completion_tokens", 0),
@@ -235,7 +241,7 @@ class FakeProvider(_RecordingProvider):
             raise text
         cached, uncached, output = self._tokens
         return LlmResponse(
-            text=text, model=model,
+            text=text, model=model, finish_reason="stop",
             cached_input_tokens=cached, uncached_input_tokens=uncached,
             output_tokens=output,
         )
