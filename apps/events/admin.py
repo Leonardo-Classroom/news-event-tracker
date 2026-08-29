@@ -12,8 +12,8 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.events.models import (
-    DORMANT_AFTER_DAYS, Event, EventAlias, EventDocument, EventStatus,
-    EventVisibility,
+    DORMANT_AFTER_DAYS, Event, EventAlias, EventDocument, EventMergeLog,
+    EventStatus, EventVisibility,
 )
 
 
@@ -94,3 +94,19 @@ class EventAdmin(admin.ModelAdmin):
         shown = "、".join(terms[:4])
         more = f" +{len(terms)-4}" if len(terms) > 4 else ""
         return format_html('<small>{}{}</small>', shown or "—", more)
+
+
+@admin.register(EventMergeLog)
+class EventMergeLogAdmin(admin.ModelAdmin):
+    """合併紀錄唯讀——這是稽核軌跡，事後修改會破壞它存在的意義。"""
+
+    list_display = ("source_title", "source_slug", "target_event", "document_count",
+                    "merged_at")
+    readonly_fields = [f.name for f in EventMergeLog._meta.fields]
+    search_fields = ("source_title", "source_slug", "target_event__title")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

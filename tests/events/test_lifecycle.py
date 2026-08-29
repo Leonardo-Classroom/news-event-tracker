@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.events.models import (
     DORMANT_AFTER_DAYS, Event, EventStatus, EventVisibility, InvalidTransition,
+    RiskTier, WordingGateFailed,
 )
 
 UTC = dt.timezone.utc
@@ -136,6 +137,60 @@ class TestWakeUp:
         e = make_event(status=EventStatus.ACTIVE, last_progress_at=latest)
         e.record_progress(dt.datetime(2026, 1, 1, tzinfo=UTC), save=False)
         assert e.last_progress_at == latest
+
+
+class TestWordingGate:
+    """進入 draft 前強制過措辭檢查器，不提供繞過參數（任務 39）。"""
+
+    def test_違規措辭擋下進入draft(self):
+        e = make_event(status=EventStatus.CANDIDATE, risk_tier=RiskTier.HIGH,
+                       summary="柯文哲貪污犯，京華城案已定讞")
+        with pytest.raises(WordingGateFailed):
+            e.transition_to(EventStatus.DRAFT, save=False)
+        assert e.status == EventStatus.CANDIDATE, "檢查失敗時狀態不應被改動"
+
+    def test_合規措辭可進入draft(self):
+        e = make_event(status=EventStatus.CANDIDATE, risk_tier=RiskTier.HIGH,
+                       summary="柯文哲遭起訴涉嫌圖利，案件仍在審理中")
+        e.transition_to(EventStatus.DRAFT, save=False)
+        assert e.status == EventStatus.DRAFT
+
+    def test_低中風險事件的定讞用語視為真實敘述(self):
+        """risk_tier 非 HIGH 代表沒有未定讞的具名自然人，
+        此時終結性用語（如「已定讞」）是陳述已發生的事實。"""
+        e = make_event(status=EventStatus.CANDIDATE, risk_tier=RiskTier.MEDIUM,
+                       summary="陳水扁貪污案判刑確定")
+        e.transition_to(EventStatus.DRAFT, save=False)
+        assert e.status == EventStatus.DRAFT
+
+    def test_current_status_text也受檢查(self):
+        e = make_event(status=EventStatus.CANDIDATE, risk_tier=RiskTier.HIGH,
+                       current_status_text="沈慶京詐欺犯，已入獄服刑")
+        with pytest.raises(WordingGateFailed):
+            e.transition_to(EventStatus.DRAFT, save=False)
+
+    def test_空白摘要不觸發檢查(self):
+        e = make_event(status=EventStatus.CANDIDATE, risk_tier=RiskTier.HIGH)
+        e.transition_to(EventStatus.DRAFT, save=False)
+        assert e.status == EventStatus.DRAFT
+
+    def test_發布前再次檢查(self):
+        """summary 可能在 draft 之後、發布之前又被編輯過，
+        不能只信任進入 draft 時的那一次結果。"""
+        e = make_event(status=EventStatus.ACTIVE, risk_tier=RiskTier.HIGH,
+                       summary="合規的敘述")
+        e.summary = "柯文哲貪污犯定讞"
+        with pytest.raises(WordingGateFailed):
+            e.publish(save=False)
+
+
+class TestRiskTier:
+    def test_高風險不可批次通過(self):
+        assert make_event(risk_tier=RiskTier.HIGH).allows_batch_review is False
+
+    def test_中低風險可批次通過(self):
+        assert make_event(risk_tier=RiskTier.MEDIUM).allows_batch_review is True
+        assert make_event(risk_tier=RiskTier.LOW).allows_batch_review is True
 
 
 class TestCheckInterval:

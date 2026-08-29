@@ -82,6 +82,16 @@ class InvalidTransition(ValidationError):
     """
 
 
+class WordingGateFailed(InvalidTransition):
+    """措辭檢查未通過，無法進入 draft 或發布（任務 39）。
+
+    獨立於 ``InvalidTransition`` 命名（雖繼承自它，行為一致），
+    讓呼叫端可以區分「流程順序錯了」與「內容違反無罪推定原則」——
+    兩者給使用者看的訊息與該做的事完全不同：前者是操作錯誤，
+    後者是要求回去修改文字。
+    """
+
+
 class EventQuerySet(models.QuerySet):
     def tracking(self):
         """仍在追蹤中者（active 或 dormant）。"""
@@ -161,6 +171,10 @@ class Event(models.Model):
 
         公開（visibility）與狀態分開處理：事件可以是 active 但未公開
         （尚未審核發布），也可以已公開而後轉為 dormant。
+
+        **進入 draft 前強制過措辭檢查器，不提供繞過參數**（任務 39，
+        規格 §4.5）。這裡不是「建議先檢查」，是唯一路徑——呼叫端沒有
+        辦法傳入任何參數跳過這道檢查，要通過就只能改文字重新呼叫。
         """
         if target == self.status:
             return
@@ -169,15 +183,59 @@ class Event(models.Model):
                 f"不可由 {self.status} 轉為 {target}。"
                 f"允許的目標：{sorted(ALLOWED_TRANSITIONS.get(self.status, set())) or '無'}"
             )
+        if target == EventStatus.DRAFT:
+            self._enforce_wording_gate()
         self.status = target
         if save:
             self.save(update_fields=["status", "updated_at"])
 
+    def _enforce_wording_gate(self) -> None:
+        from apps.compliance.wording import check_wording
+
+        # risk_tier == HIGH 正是「具名自然人且未判決確定」——與措辭檢查器
+        # 的 is_final 判準是同一件事的兩種呈現，因此可以直接借用
+        # （見 apps.compliance.risk 的設計說明）。
+        is_final = self.risk_tier != RiskTier.HIGH
+        for field_name, text in (("summary", self.summary),
+                                 ("current_status_text", self.current_status_text)):
+            if not text:
+                continue
+            result = check_wording(text, is_final=is_final)
+            if not result.passed:
+                reasons = "；".join(v.reason for v in result.violations)
+                raise WordingGateFailed(
+                    f"措辭檢查未通過，無法進入 draft（欄位：{field_name}）：{reasons}"
+                )
+
+    def recompute_risk_tier(self, *, save: bool = True) -> str:
+        """依掛載文件的抽取結果重新判定風險分級（任務 40）。
+
+        由抽取結果決定、不由人工指定——見 ``apps.compliance.risk`` 的
+        設計說明。應在每次歸屬新文件後呼叫。
+        """
+        from apps.compliance.risk import determine_risk_tier_for_event
+
+        self.risk_tier = determine_risk_tier_for_event(self)
+        if save:
+            self.save(update_fields=["risk_tier", "updated_at"])
+        return self.risk_tier
+
+    @property
+    def allows_batch_review(self) -> bool:
+        """高風險事件禁止批次通過，必須逐條確認（規格 §4.3.1）。"""
+        return self.risk_tier != RiskTier.HIGH
+
     def publish(self, *, save: bool = True) -> None:
         """發布。僅 active 事件可公開——draft 尚未經審核，
-        candidate 更是自動產生未經人看過。"""
+        candidate 更是自動產生未經人看過。
+
+        再過一次措辭檢查器，作為進入 draft 時那道檢查之外的第二層——
+        summary／current_status_text 可能在 draft 之後、發布之前又被
+        編輯過，不能只信任進入 draft 時的那一次結果。
+        """
         if self.status != EventStatus.ACTIVE:
             raise InvalidTransition(f"僅 active 事件可公開，目前為 {self.status}")
+        self._enforce_wording_gate()
         self.visibility = EventVisibility.PUBLIC
         if save:
             self.save(update_fields=["visibility", "updated_at"])
@@ -294,3 +352,39 @@ class EventDocument(models.Model):
 
     def __str__(self) -> str:
         return f"{self.event_id} ← {self.document_id}（{self.get_method_display()}）"
+
+
+class EventMergeLog(models.Model):
+    """事件合併紀錄（任務 26）。
+
+    歸屬階段的漏判必然產生重複事件——這不是附加功能，是 ADR-0005
+    兩階段偵測（先歸屬既有事件、未歸屬者才叢集）下的必然結果。
+    合併邏輯見 ``apps.events.merging.merge_events``。
+
+    ``source_event`` 設 ``SET_NULL`` 而非 ``CASCADE``：合併會刪除來源
+    事件（見 ``merging`` 模組的說明），若這裡用 CASCADE，來源事件一
+    刪除，這筆合併紀錄就跟著消失——那正是最需要留存的稽核資訊。
+    ``source_slug``／``source_title`` 因此獨立存一份，不依賴外鍵存活。
+    """
+
+    source_event = models.ForeignKey(
+        Event, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="merge_logs_as_source",
+    )
+    source_slug = models.SlugField(max_length=128, allow_unicode=True)
+    source_title = models.CharField(max_length=256)
+    target_event = models.ForeignKey(
+        Event, on_delete=models.CASCADE, related_name="merge_logs_as_target",
+    )
+    document_count = models.PositiveIntegerField(
+        default=0, help_text="合併時由來源事件轉移過去的文件數")
+    reason = models.TextField(blank=True)
+    merged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-merged_at"]
+        verbose_name = "事件合併紀錄"
+        verbose_name_plural = "事件合併紀錄"
+
+    def __str__(self) -> str:
+        return f"{self.source_slug} → {self.target_event_id}（{self.document_count} 篇）"

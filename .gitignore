@@ -28,3 +28,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Celery beat 執行期狀態檔（二進位、每次啟動都變）
+celerybeat-schedule*
