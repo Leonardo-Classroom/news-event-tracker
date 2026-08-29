@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.sitemaps",       # SEO 是一級需求（規格 §4.7）
     "apps.ingest",
     "apps.extract",
+    "apps.retrieval",
     "apps.llm",
 ]
 
