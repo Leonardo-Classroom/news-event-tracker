@@ -124,3 +124,58 @@ class TestWebInterface:
         html = admin_client.get(f"/e/{event.slug}/").content.decode()
         assert "天無報導" in html, "跨越一年半的間隔未被標示為空白期"
         assert "報導0" in html and "報導1" in html
+
+
+class TestPager:
+    """分頁元件——省略號頁碼範圍、跳頁表單、查詢參數在換頁時是否保留。"""
+
+    @pytest.fixture
+    def many_documents(self, source, db):
+        from apps.ingest.models import Document
+
+        for i in range(120):
+            Document.objects.create(
+                source=source, url=f"https://pager.test/{i}", title=f"文件{i}",
+                raw_body="內文", content_class=source.content_class,
+            )
+
+    def test_單頁時不顯示分頁列(self, admin_client, source, db):
+        from apps.ingest.models import Document
+
+        Document.objects.create(source=source, url="https://pager.test/only",
+                                title="唯一文件", raw_body="x",
+                                content_class=source.content_class)
+        html = admin_client.get("/documents/").content.decode()
+        assert 'class="pager"' not in html
+
+    def test_跳頁表單顯示正確總頁數(self, admin_client, many_documents):
+        html = admin_client.get("/documents/").content.decode()
+        assert "／3 頁" in html   # 120 篇 ÷ 50 筆/頁 = 3 頁
+
+    def test_第一頁不顯示上一頁與首頁連結(self, admin_client, many_documents):
+        html = admin_client.get("/documents/").content.decode()
+        assert "首頁" not in html
+        assert "上一頁" not in html
+        assert "下一頁" in html
+
+    def test_最後一頁不顯示下一頁與末頁連結(self, admin_client, many_documents):
+        html = admin_client.get("/documents/?page=3").content.decode()
+        assert "下一頁" not in html
+        assert "末頁" not in html
+        assert "上一頁" in html
+
+    def test_換頁連結保留搜尋參數(self, admin_client, many_documents):
+        html = admin_client.get("/documents/?page=1&q=文件").content.decode()
+        assert "page=2" in html
+        assert "q=%E6%96%87%E4%BB%B6" in html or "q=文件" in html
+
+    def test_跳頁表單以隱藏欄位保留搜尋參數(self, admin_client, many_documents):
+        html = admin_client.get("/documents/?q=文件").content.decode()
+        assert 'name="q" value="文件"' in html
+
+    def test_無效頁碼不報錯(self, admin_client, many_documents):
+        """Paginator.get_page 對超出範圍或非數字的頁碼會自動夾回
+        有效範圍，不該讓頁面回 500。"""
+        assert admin_client.get("/documents/?page=9999").status_code == 200
+        assert admin_client.get("/documents/?page=abc").status_code == 200
+        assert admin_client.get("/documents/?page=-1").status_code == 200

@@ -1,0 +1,48 @@
+{% comment %}
+分頁元件。用 {% templatetag openblock %} querystring {% templatetag closeblock %}（Django 5.1+ 內建）覆寫 page 參數、
+保留其餘查詢參數（q、source、only…）——不必為每個頁面各自組一次
+query string，也不會在新增篩選條件時漏改某個連結。
+
+帶省略號的頁碼範圍（``page_range``）由 view 端用
+``Paginator.get_elided_page_range()`` 算好傳進來——Django 模板不支援
+呼叫帶參數的方法，``get_elided_page_range(number, on_each_side=2,
+on_ends=1)`` 需要參數，沒辦法直接在模板裡呼叫。
+
+用法：{% include "web/_pager.html" with page=page page_range=page_range %}
+{% endcomment %}
+{% if page.paginator.num_pages > 1 %}
+<div class="pager">
+  {% if page.has_previous %}
+    <a class="btn" href="{% querystring page=1 %}" title="第一頁">« 首頁</a>
+    <a class="btn" href="{% querystring page=page.previous_page_number %}">‹ 上一頁</a>
+  {% endif %}
+
+  <div class="chips" style="align-items:center">
+    {% for num in page_range %}
+      {% if num == page.paginator.ELLIPSIS %}
+        <span style="color:var(--text-3);padding:0 2px">…</span>
+      {% elif num == page.number %}
+        <span class="tag accent mono">{{ num }}</span>
+      {% else %}
+        <a class="mono" href="{% querystring page=num %}" style="padding:2px 7px">{{ num }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if page.has_next %}
+    <a class="btn" href="{% querystring page=page.next_page_number %}">下一頁 ›</a>
+    <a class="btn" href="{% querystring page=page.paginator.num_pages %}" title="最後一頁">末頁 »</a>
+  {% endif %}
+
+  <span class="spacer"></span>
+
+  <form method="get" style="display:flex;gap:6px;align-items:center">
+    {% for key, values in request.GET.lists %}{% if key != 'page' %}{% for v in values %}<input type="hidden" name="{{ key }}" value="{{ v }}">{% endfor %}{% endif %}{% endfor %}
+    <span style="font-size:11px;color:var(--text-3)">跳至第</span>
+    <input type="number" name="page" min="1" max="{{ page.paginator.num_pages }}"
+           value="{{ page.number }}" class="mono" style="width:64px">
+    <span style="font-size:11px;color:var(--text-3)">／{{ page.paginator.num_pages }} 頁</span>
+    <button class="btn" style="padding:2px 8px">→</button>
+  </form>
+</div>
+{% endif %}

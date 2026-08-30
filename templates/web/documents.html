@@ -47,11 +47,5 @@
 </div>
 </div>
 
-<div class="pager">
-  {% if page.has_previous %}<a class="btn" href="?{% if q %}q={{ q }}&{% endif %}{% if source %}source={{ source }}&{% endif %}{% if only %}only={{ only }}&{% endif %}page={{ page.previous_page_number }}">← 上一頁</a>{% endif %}
-  <span class="spacer"></span>
-  <span class="mono">{{ page.number }} / {{ page.paginator.num_pages }}</span>
-  <span class="spacer"></span>
-  {% if page.has_next %}<a class="btn" href="?{% if q %}q={{ q }}&{% endif %}{% if source %}source={{ source }}&{% endif %}{% if only %}only={{ only }}&{% endif %}page={{ page.next_page_number }}">下一頁 →</a>{% endif %}
-</div>
+{% include "web/_pager.html" %}
 {% endblock %}

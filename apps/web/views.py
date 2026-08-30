@@ -151,8 +151,12 @@ def documents(request):
         queryset = queryset.exclude(embedding=None)
 
     page = Paginator(queryset, 50).get_page(request.GET.get("page"))
+    # 帶省略號的頁碼範圍在 view 端算好——模板不支援呼叫帶參數的方法
+    # （get_elided_page_range 需要 number／on_each_side／on_ends 參數）。
+    page_range = page.paginator.get_elided_page_range(
+        page.number, on_each_side=2, on_ends=1)
     return render(request, "web/documents.html", {
-        "nav": "documents", "page": page, "q": query,
+        "nav": "documents", "page": page, "page_range": page_range, "q": query,
         "source": source, "only": only,
         "sources": Source.objects.order_by("name").values("slug", "name"),
     })
