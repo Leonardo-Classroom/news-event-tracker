@@ -15,6 +15,7 @@ urlpatterns = [
     path("", views.events, name="events"),
     path("e/<slug:slug>/", views.event_detail, name="event_detail"),
     path("e/<slug:slug>/publish/", views.event_publish, name="event_publish"),
+    path("e/<slug:slug>/unpublish/", views.event_unpublish, name="event_unpublish"),
     path("review/", views.review, name="review"),
     path("review/batch/", views.review_batch, name="review_batch"),
     path("review/<slug:slug>/", views.review_detail, name="review_detail"),

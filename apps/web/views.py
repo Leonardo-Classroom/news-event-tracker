@@ -27,8 +27,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.events.models import (
-    DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus, InvalidTransition,
-    RiskTier, WordingGateFailed,
+    DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus, EventVisibility,
+    InvalidTransition, RiskTier, WordingGateFailed,
 )
 from apps.review.service import ReviewError, approve, batch_approve, reject
 from apps.ingest.models import Document, ExternalSession, Source
@@ -47,6 +47,7 @@ GAP_HIGHLIGHT_DAYS = 45
 def events(request):
     """追蹤中的事件。首頁——事件是本系統的核心物件。"""
     status = request.GET.get("status", "")
+    visibility = request.GET.get("visibility", "")
     queryset = (Event.objects.exclude(status=EventStatus.REJECTED)
                 .annotate(doc_count=Count("event_documents"))
                 .order_by("-last_progress_at"))
@@ -56,6 +57,15 @@ def events(request):
         queryset = queryset.filter(
             status__in=[EventStatus.ACTIVE, EventStatus.DORMANT, EventStatus.CLOSED])
 
+    # 總覽數字取自狀態篩選後、公開篩選前——否則選「已公開」時
+    # 「未公開 0」沒有資訊量。
+    public_count = queryset.filter(visibility=EventVisibility.PUBLIC).count()
+    private_count = queryset.filter(visibility=EventVisibility.PRIVATE).count()
+    if visibility == EventVisibility.PUBLIC:
+        queryset = queryset.filter(visibility=EventVisibility.PUBLIC)
+    elif visibility == EventVisibility.PRIVATE:
+        queryset = queryset.filter(visibility=EventVisibility.PRIVATE)
+
     now = timezone.now()
     rows = []
     for event in queryset:
@@ -64,6 +74,8 @@ def events(request):
 
     return render(request, "web/events.html", {
         "nav": "events", "rows": rows, "status": status,
+        "visibility": visibility,
+        "public_count": public_count, "private_count": private_count,
         "statuses": EventStatus.choices,
         "dormant_after": DORMANT_AFTER_DAYS,
     })
@@ -129,6 +141,16 @@ def event_publish(request, slug):
         messages.success(request, f"已公開「{event.title}」")
     except (WordingGateFailed, InvalidTransition) as exc:
         messages.error(request, _exc_message(exc))
+    return redirect("web:event_detail", slug=event.slug)
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def event_unpublish(request, slug):
+    """撤下公開。不設狀態前提——下架必須立刻生效（規格 §8.4）。"""
+    event = get_object_or_404(Event, slug=slug)
+    event.unpublish()
+    messages.success(request, f"已取消公開「{event.title}」")
     return redirect("web:event_detail", slug=event.slug)
 
 

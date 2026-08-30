@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>事件</h1>
-  <span class="sub">{{ rows|length }} 個</span>
+  <span class="sub">{{ rows|length }} 個　公開 {{ public_count }}　未公開 {{ private_count }}</span>
   <span class="spacer"></span>
   <form method="get" class="filters" style="margin:0">
     <select name="status" onchange="this.form.submit()">
@@ -12,6 +12,11 @@
         <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
+    <select name="visibility" onchange="this.form.submit()">
+      <option value="">公開狀態（全部）</option>
+      <option value="public" {% if visibility == 'public' %}selected{% endif %}>已公開</option>
+      <option value="private" {% if visibility == 'private' %}selected{% endif %}>未公開</option>
+    </select>
   </form>
 </div>
 
@@ -19,21 +24,23 @@
 <div class="table-scroll">
 <table>
   <thead><tr>
-    <th>事件</th><th>領域</th><th>狀態</th><th class="num">文件</th>
+    <th>事件</th><th>領域</th><th>狀態</th><th>公開</th><th class="num">文件</th>
     <th class="num">最後進展</th><th>識別特徵</th>
   </tr></thead>
   <tbody>
   {% for row in rows %}
     <tr>
-      <td><a href="{% url 'web:event_detail' row.event.slug %}"><b>{{ row.event.title }}</b></a>
-        {% if row.event.visibility == 'private' %}<span class="tag muted">未公開</span>{% endif %}
-      </td>
+      <td><a href="{% url 'web:event_detail' row.event.slug %}"><b>{{ row.event.title }}</b></a></td>
       <td class="tight">{{ row.event.get_domain_display }}</td>
       <td class="tight">
         {% if row.event.status == 'active' %}<span class="tag ok">追蹤中</span>
         {% elif row.event.status == 'dormant' %}<span class="tag warn">沉寂</span>
         {% elif row.event.status == 'closed' %}<span class="tag muted">已結案</span>
         {% else %}<span class="tag accent">{{ row.event.get_status_display }}</span>{% endif %}
+      </td>
+      <td class="tight">
+        {% if row.event.visibility == 'public' %}<span class="tag ok">已公開</span>
+        {% else %}<span class="tag muted">未公開</span>{% endif %}
       </td>
       <td class="num">{{ row.event.doc_count }}</td>
       <td class="num tight">
@@ -50,7 +57,7 @@
       </div></td>
     </tr>
   {% empty %}
-    <tr><td colspan="6" class="empty">沒有符合的事件</td></tr>
+    <tr><td colspan="7" class="empty">沒有符合的事件</td></tr>
   {% endfor %}
   </tbody>
 </table>

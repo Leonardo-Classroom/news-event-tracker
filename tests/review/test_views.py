@@ -181,3 +181,54 @@ class TestEventPublish:
         make_event()
         admin_client.post("/e/pending/publish/")
         assert Event.objects.get(slug="pending").visibility == EventVisibility.PRIVATE
+
+    def test_已公開的詳情頁可取消公開(self, admin_client, db):
+        make_event(status=EventStatus.ACTIVE, slug="ready", title="可公開")
+        admin_client.post("/e/ready/publish/")
+        html = admin_client.get("/e/ready/").content.decode()
+        assert ">取消公開</button>" in html
+        assert "公開此事件" not in html
+        admin_client.post("/e/ready/unpublish/")
+        event = Event.objects.get(slug="ready")
+        assert event.visibility == EventVisibility.PRIVATE
+        html = admin_client.get("/e/ready/").content.decode()
+        assert "公開此事件" in html
+        assert ">取消公開</button>" not in html
+
+    def test_一般帳號不能取消公開(self, user_client, db):
+        make_event(status=EventStatus.ACTIVE, slug="ready",
+                   visibility=EventVisibility.PUBLIC)
+        response = user_client.post("/e/ready/unpublish/")
+        assert response.status_code == 403
+        assert Event.objects.get(slug="ready").visibility == EventVisibility.PUBLIC
+
+    def test_GET不觸發取消公開(self, admin_client, db):
+        make_event(status=EventStatus.ACTIVE, slug="ready",
+                   visibility=EventVisibility.PUBLIC)
+        assert admin_client.get("/e/ready/unpublish/").status_code == 405
+        assert Event.objects.get(slug="ready").visibility == EventVisibility.PUBLIC
+
+
+class TestEventListVisibility:
+    def test_列表同時標示已公開與未公開並給總覽(self, admin_client, db):
+        pub = make_event(status=EventStatus.ACTIVE, slug="pub", title="已上線案件")
+        pub.publish()
+        make_event(status=EventStatus.ACTIVE, slug="hid", title="內部案件")
+        html = admin_client.get("/").content.decode()
+        assert "公開 1" in html
+        assert "未公開 1" in html
+        assert "已公開" in html
+        assert "未公開" in html
+        assert "已上線案件" in html
+        assert "內部案件" in html
+
+    def test_可只列出已公開(self, admin_client, db):
+        pub = make_event(status=EventStatus.ACTIVE, slug="pub", title="已上線案件")
+        pub.publish()
+        make_event(status=EventStatus.ACTIVE, slug="hid", title="內部案件")
+        html = admin_client.get("/", {"visibility": "public"}).content.decode()
+        assert "已上線案件" in html
+        assert "內部案件" not in html
+        # 總覽仍反映篩選前的數量
+        assert "公開 1" in html
+        assert "未公開 1" in html

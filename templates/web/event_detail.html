@@ -12,10 +12,17 @@
   <span class="spacer"></span>
   {% if pending_review %}
     <a href="{% url 'web:review_detail' event.slug %}" class="btn primary">審核此事件</a>
-  {% elif event.status == 'active' and event.visibility == 'private' and request.user.is_staff %}
-    <form method="post" action="{% url 'web:event_publish' event.slug %}">{% csrf_token %}
-      <button class="btn primary">公開此事件</button>
-    </form>
+  {% elif request.user.is_staff %}
+    {% if event.status == 'active' and event.visibility == 'private' %}
+      <form method="post" action="{% url 'web:event_publish' event.slug %}">{% csrf_token %}
+        <button class="btn primary">公開此事件</button>
+      </form>
+    {% elif event.visibility == 'public' %}
+      <a href="/case/{{ event.slug }}/" class="btn">查看公開頁</a>
+      <form method="post" action="{% url 'web:event_unpublish' event.slug %}">{% csrf_token %}
+        <button class="btn danger">取消公開</button>
+      </form>
+    {% endif %}
   {% endif %}
   <a href="/admin/events/event/{{ event.pk }}/change/" class="sub">在 admin 編輯</a>
 </div>
