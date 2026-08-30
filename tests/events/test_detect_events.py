@@ -29,18 +29,21 @@ class TestDetectEvents:
         cluster_a = _blob([1.0] + [0.0] * 1023, 6, seed=1)
         cluster_b = _blob([0.0, 1.0] + [0.0] * 1022, 6, seed=2)
         docs = []
+        # relevance_signals 需通過 is_corroborated（任務 24 的候選池
+        # 二次過濾）——弊案專屬類別單獨命中即足夠
+        signals = {"categories": ["corruption_charge"], "has_identifier": False}
         for i, vec in enumerate(cluster_a):
             docs.append(Document.objects.create(
                 source=source, url=f"https://t.test/a{i}", title=f"甲案報導{i}",
                 raw_body="內文", content_class=source.content_class,
-                relevant=True, embedding=vec,
+                relevant=True, embedding=vec, relevance_signals=signals,
                 published_at=dt.datetime(2026, 1, i + 1, tzinfo=UTC),
             ))
         for i, vec in enumerate(cluster_b):
             docs.append(Document.objects.create(
                 source=source, url=f"https://t.test/b{i}", title=f"乙案報導{i}",
                 raw_body="內文", content_class=source.content_class,
-                relevant=True, embedding=vec,
+                relevant=True, embedding=vec, relevance_signals=signals,
                 published_at=dt.datetime(2026, 2, i + 1, tzinfo=UTC),
             ))
         return docs
@@ -86,4 +89,26 @@ class TestDetectEvents:
 
     def test_無候選文件時不報錯(self, db):
         call_command("detect_events")
+        assert Event.objects.count() == 0
+
+    def test_僅鬆散相關的文件不進入候選池(self, source, db):
+        """實測發現的落差：相關性過濾單一類別命中即通過（偏向召回），
+        但「大法官人事任命」這類政治新聞只透過 judicial_body（命中
+        「法官」）就會通過過濾，若直接拿來分群會被誤判成候選事件。
+        本測試建一組語意緊密但僅鬆散相關的文件，驗證它們不會被
+        detect_events 撈進候選池、也就不會產生候選事件。"""
+        from apps.ingest.models import Document
+
+        cluster = _blob([1.0] + [0.0] * 1023, 6, seed=5)
+        weak_signals = {"categories": ["judicial_body"], "has_identifier": False}
+        for i, vec in enumerate(cluster):
+            Document.objects.create(
+                source=source, url=f"https://t.test/weak{i}", title=f"政治新聞{i}",
+                raw_body="內文", content_class=source.content_class,
+                relevant=True, embedding=vec, relevance_signals=weak_signals,
+                published_at=dt.datetime(2026, 3, i + 1, tzinfo=UTC),
+            )
+
+        call_command("detect_events", "--min-cluster-size", "5")
+
         assert Event.objects.count() == 0

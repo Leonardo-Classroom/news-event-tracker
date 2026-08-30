@@ -8,7 +8,7 @@
 """
 import pytest
 
-from apps.extract.relevance import RELEVANCE_TERMS, assess_relevance
+from apps.extract.relevance import RELEVANCE_TERMS, assess_relevance, is_corroborated
 
 
 class TestRelevantCases:
@@ -144,3 +144,42 @@ class TestSubstringContamination:
         """立法院出現不該遮蔽同文中真實的司法內容。"""
         text = "立法院修法之際，台北地方法院正審理相關案件。"
         assert assess_relevance(body=text).relevant is True
+
+
+class TestIsCorroborated:
+    """事件偵測（任務 24）候選池的第二層過濾，比相關性過濾更嚴格。
+
+    實測發現的落差：相關性過濾單一類別命中即通過（偏向召回是對的，
+    抽取成本低），但 HDBSCAN 直接拿這個寬鬆候選池分群，讓「大法官
+    人事任命」這類只透過 judicial_body（命中「法官」）通過過濾的
+    政治新聞也被分群成候選事件——跑一次全量偵測，343 個候選裡
+    245 個（71%）標題完全不含任何司法弊案核心詞。
+    """
+
+    def test_單靠judicial_body不夠具體(self):
+        """「大法官人事再遭封殺」只會命中 judicial_body 的「法官」
+        （子字串比對對「大法官」一樣命中），這正是實測揪出的漏洞。"""
+        signals = {"categories": ["judicial_body"], "has_identifier": False}
+        assert not is_corroborated(signals)
+
+    def test_弊案專屬類別單獨命中即足夠(self):
+        """「圖利」「回扣」這類詞本身就具體指向弊案，
+        不會出現在無關的政治新聞裡，不需要第二個類別佐證。"""
+        for category in ["corruption_charge", "corruption_context", "oversight"]:
+            signals = {"categories": [category], "has_identifier": False}
+            assert is_corroborated(signals), f"{category} 應單獨即足夠"
+
+    def test_有識別碼即足夠(self):
+        signals = {"categories": ["judicial_body"], "has_identifier": True}
+        assert is_corroborated(signals)
+
+    def test_兩個類別互相佐證(self):
+        """與 fixtures/LABELING_GUIDE.md 的「主要關鍵字 + 佐證詞」
+        是同一個道理——單一類別命中不足以排除同名但無關的可能。"""
+        signals = {"categories": ["judicial_process", "judicial_body"],
+                  "has_identifier": False}
+        assert is_corroborated(signals)
+
+    def test_空訊號不通過(self):
+        assert not is_corroborated({})
+        assert not is_corroborated({"categories": []})

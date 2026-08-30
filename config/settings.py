@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.retrieval",
     "apps.events",
     "apps.llm",
+    "apps.timeline",
     "apps.web",
 ]
 

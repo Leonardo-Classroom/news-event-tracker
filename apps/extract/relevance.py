@@ -36,7 +36,8 @@ from dataclasses import dataclass, field
 
 from apps.core.identifiers import extract_tax_ids, parse_case_number
 
-__all__ = ["RELEVANCE_TERMS", "RelevanceResult", "assess_relevance"]
+__all__ = ["RELEVANCE_TERMS", "RelevanceResult", "assess_relevance",
+           "is_corroborated", "STRONG_CATEGORIES"]
 
 #: 領域詞彙，依類別分組。類別會記入 signals，供日後調校時判斷
 #: 「是哪一類規則帶進來的」——只記布林值就無從調整。
@@ -119,6 +120,48 @@ class RelevanceResult:
     @property
     def categories(self) -> list[str]:
         return sorted(self.signals)
+
+
+#: 單獨出現就足以判定「這篇是在講具體的司法案件或弊案」的類別。
+#: 不含 judicial_body——這個類別只需命中「法官」「檢方」等機構稱謂，
+#: 而「大法官」這種與具體案件無關的政治新聞（大法官人事任命爭議、
+#: 憲法法庭運作與否）也會觸發它，因為子字串比對「法官」對「大法官」
+#: 一樣命中。
+STRONG_CATEGORIES = frozenset({"corruption_charge", "corruption_context", "oversight"})
+
+
+def is_corroborated(signals: dict) -> bool:
+    """該文件的相關性訊號是否足夠具體，值得作為**事件偵測**（而非只是
+    「該不該做 L1 抽取」）的候選。
+
+    **這是任務 13.5 相關性過濾與任務 24 事件偵測之間，一個原本沒被
+    注意到的落差。** 相關性過濾刻意偏向召回（ADR-0009：漏掉一篇的
+    代價遠高於多送一篇），單一類別命中就通過。這個設計對「該不該做
+    L1 抽取」是對的——抽取的代價只是幾分錢。但 HDBSCAN 事件偵測把
+    這個寬鬆的候選池直接拿來分群，而分群只看語意相似度：「大法官
+    人事任命」「軍公教年金訴訟」這類長期政治爭議報導彼此高度相似，
+    會被分成看起來完整的一群，但它們是政治新聞，不是規格範圍內的
+    司法案件或政商弊案。
+
+    實測：對成長中的真實語料跑 ``detect_events``，343 個候選事件中
+    245 個（71%）的文件標題完全不含任何司法弊案核心詞——「憲法法庭
+    停擺」「行政院拒編預算」「軍警調薪」等政治爭議新聞，都是透過
+    ``judicial_body``（「法官」命中了「大法官」）這個類別單獨通過
+    相關性過濾，才進入了叢集候選池。
+
+    判準：命中弊案專屬類別（``corruption_charge``／``corruption_context``／
+    ``oversight``）即足夠——這些詞彙本身就具體指向弊案（「圖利」
+    「回扣」「糾正案」不會出現在無關的政治新聞裡）；或有案號／統編
+    這類強識別碼；否則需要至少兩個類別同時命中（互相佐證），
+    與 ``fixtures/LABELING_GUIDE.md`` 「主要關鍵字 + 佐證詞」是
+    同一個道理——單一類別的命中不足以排除「同名但無關」的可能。
+    """
+    categories = set(signals.get("categories", []))
+    if categories & STRONG_CATEGORIES:
+        return True
+    if signals.get("has_identifier"):
+        return True
+    return len(categories) >= 2
 
 
 def assess_relevance(title: str = "", body: str = "") -> RelevanceResult:
