@@ -69,6 +69,14 @@ class TestCaseDetail:
         assert response.status_code == 200
         assert "測試案件" in response.content.decode()
 
+    def test_模板註解不出現在頁面上(self, published_event):
+        """{# ... #} 的正則是 {#.*?#}，點號不吃換行；多行註解會原樣
+        漏進 HTML，瀏覽器再把 <head> 裡的文字抬到可見頁面上。"""
+        for path in ("/case/", f"/case/{published_event.slug}/"):
+            html = client_get(path).content.decode()
+            assert "{#" not in html
+            assert "self.blockname" not in html
+
     def test_未公開事件回404(self, db):
         Event.objects.create(slug="draft-case", title="草稿案件", status=EventStatus.DRAFT)
         assert client_get("/case/draft-case/").status_code == 404

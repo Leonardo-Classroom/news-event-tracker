@@ -3,9 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{# Django 模板不支援 Jinja2 的 self.blockname 語法，描述文字無法在
-   多個 block 之間共用同一份預設值，因此各頁面各自 override description
-   與 og_description 兩者（見 case_detail.html）——維護時要記得同步改。 #}
+{% comment %}
+  Django 的 {# #} 註解正則是 {#.*?#}，點號不吃換行，多行會原樣漏到 HTML，
+  瀏覽器再把 <head> 裡的文字抬到頁面上。跨行說明用 comment 標籤。
+
+  Django 模板沒有 Jinja2 的 self.blockname，描述文字無法在多個 block
+  之間共用同一份預設值，因此各頁面各自 override description 與
+  og_description（見 case_detail.html）——維護時要記得同步改。
+{% endcomment %}
 <title>{% block title %}案件追蹤{% endblock %}｜新聞事件追蹤</title>
 <meta name="description" content="{% block description %}持續追蹤台灣重大司法案件與政商弊案的後續進展，新聞停止報導後，我們接續追下去。{% endblock %}">
 <link rel="canonical" href="{{ request.build_absolute_uri }}">
