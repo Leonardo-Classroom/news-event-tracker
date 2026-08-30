@@ -29,6 +29,12 @@
 
   {% if event.summary %}<p class="summary">{{ event.summary }}</p>{% endif %}
 
+  {% if event.core_terms %}
+  <div class="chips">
+    {% for term in event.core_terms %}<span class="chip">{{ term }}</span>{% endfor %}
+  </div>
+  {% endif %}
+
   {% if timeline %}
   <h2 class="section-title">時間線</h2>
   {% for item in timeline %}
@@ -53,6 +59,31 @@
       {% if edge.kind == 'stated' %}<span class="tag active kind-tag">報導明述</span>
       {% else %}<span class="tag dormant kind-tag">系統推論（信心 {{ edge.confidence|floatformat:0 }}%）</span>{% endif %}
       {{ edge.from_node.summary }} → {{ edge.to_node.summary }}
+    </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if sources %}
+  <h2 class="section-title">報導與官方紀錄<span class="count">{{ sources|length }}</span></h2>
+  <p class="section-note">以下為已歸入本案的來源標題與原文連結，不是新聞全文，也還不是系統自製的事實時間線。</p>
+  {% for item in sources %}
+    {% if item.gap %}
+      <div class="source-gap">⋯ {{ item.gap }} 天無新來源</div>
+    {% endif %}
+    <div class="timeline-item">
+      <div class="date">{{ item.doc.published_at|date:"Y-m-d"|default:"日期不明" }}</div>
+      <div class="body">
+        <div class="fact">
+          <a href="{{ item.doc.url }}" target="_blank" rel="noopener nofollow">{{ item.doc.title }}</a>
+        </div>
+        <div class="source-link">
+          {{ item.doc.source }}
+          {% if item.doc.body %} · <span class="tag active">官方紀錄</span>{% endif %}
+        </div>
+        {% if item.doc.body %}
+          <div class="official-body">{{ item.doc.body }}</div>
+        {% endif %}
+      </div>
     </div>
   {% endfor %}
   {% endif %}

@@ -87,6 +87,35 @@ class TestCaseDetail:
         assert "目前進度" in html
         assert "法院已一審宣判" in html
 
+    def test_無時間線節點時仍列出歸屬來源(self, published_event, news_doc):
+        """規格 §4.6 的來源清單不依賴 TimelineNode 生成。"""
+        from apps.events.models import AssignmentMethod, EventDocument
+
+        EventDocument.objects.create(
+            event=published_event, document=news_doc,
+            method=AssignmentMethod.MANUAL)
+        html = client_get(f"/case/{published_event.slug}/").content.decode()
+        assert news_doc.title in html
+        assert news_doc.url in html
+        assert news_doc.source.name in html
+        assert news_doc.raw_body[:50] not in html
+        assert "報導與官方紀錄" in html
+
+    def test_來源清單中公文可顯示全文(self, published_event, official_source):
+        from apps.events.models import AssignmentMethod, EventDocument
+        from apps.ingest.models import Document
+
+        doc = Document.objects.create(
+            source=official_source, url="https://data.judicial.gov.tw/y.pdf",
+            title="判決書", raw_body="主文：被告經判決無罪。",
+            content_class=ContentClass.PUBLIC_RECORD,
+        )
+        EventDocument.objects.create(
+            event=published_event, document=doc,
+            method=AssignmentMethod.MANUAL)
+        html = client_get(f"/case/{published_event.slug}/").content.decode()
+        assert "主文：被告經判決無罪。" in html
+
     def test_新聞全文永不外洩(self, published_event, news_doc):
         """規格 M7、G7，release blocker：公開端點回應絕不含新聞全文。"""
         node = create_timeline_node(

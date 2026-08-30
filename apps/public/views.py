@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 
 from django.core.paginator import Paginator
+from django.db.models import F
 from django.shortcuts import get_object_or_404, render
 
 from apps.compliance.redaction import public_document_fields
-from apps.events.models import Event, EventDocument, EventVisibility
+from apps.events.models import Event, EventDocument
 from apps.timeline.models import CausalEdge, TimelineNode
+
+#: 與內部工具同一門檻。公開頁的來源清單也要標出空白期——
+#: 「新聞停了」本身就是這個產品要給讀者看的資訊。
+GAP_HIGHLIGHT_DAYS = 45
 
 
 def case_list(request):
@@ -36,10 +41,12 @@ def case_list(request):
 def case_detail(request, slug):
     """單一事件頁——公開網站的核心頁面（規格 G1：首屏顯示目前進度）。
 
-    時間線只顯示引用該事件的節點；因果邊只顯示
-    ``publicly_visible=True`` 者（stated 邊預設可見，inferred 邊
-    須人工核准，見任務 42）。文件連結一律走
-    ``public_document_fields()``，不直接把 ``Document`` 物件丟給
+    時間線只顯示 TimelineNode（系統自製事實，任務 28 的生成服務
+    尚未接上，多數事件目前是空的）。規格 §4.6 另外要求來源清單
+    （標題 + 媒體 + 日期 + 原文連結）——那不依賴生成，EventDocument
+    裡已經有。因果邊只顯示 ``publicly_visible=True`` 者。
+
+    文件一律走 ``public_document_fields()``，不把 ``Document`` 丟給
     模板——避免模板不小心存取到 ``raw_body`` 而外洩新聞全文。
     """
     event = get_object_or_404(Event.objects.public(), slug=slug)
@@ -57,8 +64,25 @@ def case_detail(request, slug):
     edges = (CausalEdge.objects.filter(event=event).publicly_visible()
             .select_related("from_node", "to_node", "citation_document"))
 
+    links = (EventDocument.objects
+             .filter(event=event)
+             .select_related("document", "document__source")
+             .order_by(F("document__published_at").desc(nulls_last=True)))
+    sources = []
+    previous = None
+    for link in links:
+        doc = link.document
+        item = {"doc": public_document_fields(doc)}
+        if previous is not None and doc.published_at and previous.published_at:
+            gap = (previous.published_at - doc.published_at).days
+            if gap >= GAP_HIGHLIGHT_DAYS:
+                item["gap"] = gap
+        sources.append(item)
+        previous = doc
+
     return render(request, "public/case_detail.html", {
         "event": event, "timeline": timeline, "causal_edges": edges,
+        "sources": sources,
         "ld_json": _safe_json_ld(_schema_org_article(event)),
     })
 
