@@ -5,11 +5,14 @@
 留下不會被清除的殘留任務。這裡要驗證的是「按鈕按下去會呼叫
 dispatch_poll」，不是 Celery 本身的行為。
 """
+import datetime as dt
 from unittest.mock import patch
 
 import pytest
 
-from apps.ingest.models import Source, SourceType
+from apps.ingest.models import ExternalSession, Source, SourceType
+
+UTC = dt.timezone.utc
 
 
 @pytest.fixture
@@ -90,3 +93,82 @@ class TestCrawlersView:
         })
         crawl_source.refresh_from_db()
         assert crawl_source.service_window_start_hour is None
+
+
+class TestExternalSession:
+    def test_列表頁自動建立登記過的外部session(self, admin_client, db):
+        """判準見 EXTERNAL_SESSIONS 註冊表——即使資料庫是空的，
+        列表頁也該自動補上這筆紀錄，不必另外跑 migration 塞資料。"""
+        admin_client.get("/crawlers/")
+        assert ExternalSession.objects.filter(slug="judicial-opendata").exists()
+
+    def test_未設定時顯示尚未設定(self, admin_client, db):
+        html = admin_client.get("/crawlers/").content.decode()
+        assert "尚未設定" in html
+
+    def test_儲存cookie(self, admin_client, db):
+        admin_client.get("/crawlers/")  # 觸發自動建立
+        response = admin_client.post(
+            "/crawlers/sessions/judicial-opendata/save/",
+            {"cookie_header": ".AspNetCore.Cookies=abc123; cf_clearance=xyz"},
+        )
+        assert response.status_code == 302
+        session = ExternalSession.objects.get(slug="judicial-opendata")
+        assert session.cookie_header == ".AspNetCore.Cookies=abc123; cf_clearance=xyz"
+        assert session.captured_at is not None
+
+    def test_空白cookie不寫入(self, admin_client, db):
+        admin_client.get("/crawlers/")
+        admin_client.post("/crawlers/sessions/judicial-opendata/save/", {"cookie_header": "  "})
+        session = ExternalSession.objects.get(slug="judicial-opendata")
+        assert session.cookie_header == ""
+
+    def test_設定後顯示已設定與時間(self, admin_client, db):
+        admin_client.get("/crawlers/")
+        admin_client.post(
+            "/crawlers/sessions/judicial-opendata/save/",
+            {"cookie_header": "test=1"},
+        )
+        html = admin_client.get("/crawlers/").content.decode()
+        assert "已設定" in html
+
+    def test_不存在的slug回404(self, admin_client, db):
+        response = admin_client.post(
+            "/crawlers/sessions/nonexistent/save/", {"cookie_header": "x"})
+        assert response.status_code == 404
+
+
+class TestExternalSessionModel:
+    def test_未設定時is_set為否(self, db):
+        session = ExternalSession.objects.create(
+            slug="t", name="測試", login_url="https://example.test/login")
+        assert session.is_set is False
+
+    def test_有cookie時is_set為是(self, db):
+        session = ExternalSession.objects.create(
+            slug="t", name="測試", login_url="https://example.test/login",
+            cookie_header="a=1",
+        )
+        assert session.is_set is True
+
+    def test_從未設定過視為已過期(self, db):
+        session = ExternalSession.objects.create(
+            slug="t", name="測試", login_url="https://example.test/login")
+        assert session.likely_expired is True
+
+    def test_剛設定不算過期(self, db):
+        from django.utils import timezone
+
+        session = ExternalSession.objects.create(
+            slug="t", name="測試", login_url="https://example.test/login",
+            cookie_header="a=1", captured_at=timezone.now(),
+        )
+        assert session.likely_expired is False
+
+    def test_超過預期有效期視為過期(self, db):
+        session = ExternalSession.objects.create(
+            slug="t", name="測試", login_url="https://example.test/login",
+            cookie_header="a=1", expected_valid_hours=24,
+            captured_at=dt.datetime.now(UTC) - dt.timedelta(hours=25),
+        )
+        assert session.likely_expired is True

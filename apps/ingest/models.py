@@ -285,3 +285,52 @@ class Document(models.Model):
         # 來源欄位未變則不重算，避免無謂的 SimHash 與 bigram 計算
 
         super().save(*args, **kwargs)
+
+
+class ExternalSession(models.Model):
+    """人工登入後留存的第三方網站 session（如司法院資料開放平台）。
+
+    **為什麼需要這個模型。** 部分官方開放資料需要會員登入才能下載，
+    而登入頁掛了 Cloudflare Turnstile——實測自動化瀏覽器（Playwright
+    headless）填完帳密後，Turnstile 的隱藏 token 欄位在 15 秒內
+    始終是空的，登入無法送出。這不是能靠「換個 headless 參數」解決
+    的小問題，是 Turnstile 刻意要擋自動化登入。
+
+    刻意不用自動化手法硬闖（偽裝瀏覽器指紋、無頭偵測規避套件等）——
+    即使帳號是使用者自己的，刻意規避防護機制仍是規避，不是單純的
+    「模擬瀏覽器操作」。改為：人親自登入一次（Turnstile 對真人瀏覽器
+    完全不是問題），把登入後的 session cookie 存起來，後續的下載
+    請求重放這個 cookie。cookie 有效期有限，過期需要重新登入。
+    """
+
+    slug = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=128)
+    login_url = models.URLField(max_length=512)
+    #: 瀏覽器開發者工具「Cookie」標頭的完整字串（分號分隔的
+    #: name=value 對），不是單一 cookie 值——登入後的驗證狀態通常
+    #: 分散在多個 cookie（框架的驗證票證 + Cloudflare 的 cf_clearance）。
+    cookie_header = models.TextField(blank=True)
+    captured_at = models.DateTimeField(null=True, blank=True)
+    #: 使用者自述的有效期（小時），用於介面提示「可能已過期」——
+    #: 無法從 cookie 本身讀出真實到期時間，這只是保守的顯示用估計值。
+    expected_valid_hours = models.PositiveIntegerField(default=24)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "外部平台登入 session"
+        verbose_name_plural = "外部平台登入 session"
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def is_set(self) -> bool:
+        return bool(self.cookie_header.strip())
+
+    @property
+    def likely_expired(self) -> bool:
+        if not self.captured_at:
+            return True
+        from django.utils import timezone
+        age = timezone.now() - self.captured_at
+        return age.total_seconds() > self.expected_valid_hours * 3600

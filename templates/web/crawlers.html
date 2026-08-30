@@ -6,6 +6,36 @@
   <span class="sub">排程設定與手動觸發——健康度與覆蓋率見「管線狀態」</span>
 </div>
 
+{% if sessions %}
+<div class="card">
+  <h2>外部平台登入<span style="font-weight:400;color:var(--text-3)">　— 部分官方資料需要會員登入才能下載，登入頁有防自動化驗證，須人工登入後貼上 session</span></h2>
+  <div class="body">
+    {% for s in sessions %}
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;padding:8px 0;{% if not forloop.last %}border-bottom:1px solid var(--border){% endif %}">
+        <div style="min-width:160px">
+          <b>{{ s.name }}</b><br>
+          {% if not s.is_set %}<span class="tag muted">尚未設定</span>
+          {% elif s.likely_expired %}<span class="tag warn">可能已過期</span>　<span style="font-size:11px;color:var(--text-3)">{{ s.captured_at|date:"Y-m-d H:i" }}</span>
+          {% else %}<span class="tag ok">已設定</span>　<span style="font-size:11px;color:var(--text-3)">{{ s.captured_at|date:"Y-m-d H:i" }}</span>
+          {% endif %}
+          <br>
+          <button type="button" class="btn" style="margin-top:6px"
+                  onclick="window.open('{{ s.login_url }}','login_{{ s.slug }}','width=520,height=720')">
+            開啟登入視窗
+          </button>
+        </div>
+        <form method="post" action="{% url 'web:save_external_session' s.slug %}" style="flex:1;min-width:280px">
+          {% csrf_token %}
+          <textarea name="cookie_header" rows="2" style="width:100%;font:12px var(--mono);padding:6px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface);color:var(--text)"
+                    placeholder="在彈出視窗登入成功後，開發者工具 → Network → 任一請求 → Request Headers 裡的 Cookie 值，整段貼在這裡"></textarea>
+          <button class="btn primary" style="margin-top:6px;padding:2px 10px">儲存登入狀態</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <div class="table-scroll">
   <table>

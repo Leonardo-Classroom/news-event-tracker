@@ -14,5 +14,6 @@ urlpatterns = [
     path("crawlers/", views.crawlers, name="crawlers"),
     path("crawlers/<slug:slug>/run/", views.crawler_run, name="crawler_run"),
     path("crawlers/<slug:slug>/update/", views.crawler_update, name="crawler_update"),
+    path("crawlers/sessions/<slug:slug>/save/", views.save_external_session, name="save_external_session"),
     path("costs/", views.costs, name="costs"),
 ]

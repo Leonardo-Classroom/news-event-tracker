@@ -14,7 +14,7 @@ from django.db.models import Count, Func, IntegerField, Q
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
-from apps.ingest.models import ContentClass, Document, Source
+from apps.ingest.models import ContentClass, Document, ExternalSession, Source
 from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes
 
 
@@ -172,3 +172,11 @@ class DocumentAdmin(admin.ModelAdmin):
     def body_length(self, obj):
         length = getattr(obj, "_body_len", 0) or 0
         return f"{length:,} 字" if length else "—"
+
+
+@admin.register(ExternalSession)
+class ExternalSessionAdmin(admin.ModelAdmin):
+    """cookie_header 不進 list_display——那是憑證，不該在列表頁一覽無遺。"""
+
+    list_display = ("name", "slug", "is_set", "captured_at", "likely_expired")
+    readonly_fields = ("captured_at", "updated_at")

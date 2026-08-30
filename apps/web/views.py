@@ -29,7 +29,7 @@ from django.views.decorators.http import require_POST
 from apps.events.models import (
     DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus,
 )
-from apps.ingest.models import Document, Source
+from apps.ingest.models import Document, ExternalSession, Source
 from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, should_poll
 from apps.ingest.tasks import dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
@@ -210,6 +210,19 @@ def pipeline(request):
     })
 
 
+#: 需要人工登入才能下載的外部平台。key 是 slug。
+#:
+#: 只登記在這裡，不寫進 Source——ExternalSession 儲存的是「登入狀態」，
+#: 概念上與「新聞來源的輪詢設定」不同，硬塞進同一個模型會讓
+#: Source 同時承擔兩種不相關的職責。
+EXTERNAL_SESSIONS = {
+    "judicial-opendata": (
+        "司法院資料開放平台",
+        "https://opendata.judicial.gov.tw/member/login",
+    ),
+}
+
+
 @login_required
 def crawlers(request):
     """爬蟲排程設定與手動觸發。
@@ -227,7 +240,39 @@ def crawlers(request):
             "due_now": should_poll(source) if source.enabled else False,
             "unhealthy": source.consecutive_failures >= FAILURE_THRESHOLD,
         })
-    return render(request, "web/crawlers.html", {"nav": "crawlers", "rows": rows, "now": now})
+
+    sessions = []
+    for slug, (name, login_url) in EXTERNAL_SESSIONS.items():
+        session, _ = ExternalSession.objects.get_or_create(
+            slug=slug, defaults={"name": name, "login_url": login_url})
+        sessions.append(session)
+
+    return render(request, "web/crawlers.html", {
+        "nav": "crawlers", "rows": rows, "now": now, "sessions": sessions,
+    })
+
+
+@login_required
+@require_POST
+def save_external_session(request, slug):
+    """儲存人工登入後取得的 session cookie。
+
+    **為什麼需要人工這一步。** 這類平台的登入頁掛了 Cloudflare
+    Turnstile，自動化瀏覽器過不了——不是技術難度問題，是 Turnstile
+    刻意要擋。真人在彈出視窗裡完成登入後，把 Cookie 標頭字串貼回來，
+    系統重放這個 session，不必也不會嘗試自動通過 Turnstile。
+    """
+    session = get_object_or_404(ExternalSession, slug=slug)
+    cookie_header = request.POST.get("cookie_header", "").strip()
+    if not cookie_header:
+        messages.error(request, "請貼上登入後的 Cookie 字串")
+        return redirect("web:crawlers")
+
+    session.cookie_header = cookie_header
+    session.captured_at = timezone.now()
+    session.save(update_fields=["cookie_header", "captured_at", "updated_at"])
+    messages.success(request, f"已儲存「{session.name}」的登入 session")
+    return redirect("web:crawlers")
 
 
 @login_required
