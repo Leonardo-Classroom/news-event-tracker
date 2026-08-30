@@ -92,6 +92,36 @@ class TestCreateCausalEdge:
         )
         assert edge.confidence == 0.7
 
+    def test_stated邊預設公開(self, event, two_nodes, doc):
+        """陳述的是報導明說、且強制附引用的事實，沒有『需要人工先看
+        過才能公開』的理由——審核瓶頸該花在真正需要判斷的地方。"""
+        a, b = two_nodes
+        edge = create_causal_edge(
+            event=event, from_node=a, to_node=b, kind=CausalKind.STATED,
+            citation_document=doc,
+        )
+        assert edge.publicly_visible is True
+
+    def test_inferred邊預設不公開(self, event, two_nodes):
+        """任務 42、規格 M9：inferred 因果邊預設不公開，
+        須人工逐條勾選才顯示。"""
+        a, b = two_nodes
+        edge = create_causal_edge(
+            event=event, from_node=a, to_node=b, kind=CausalKind.INFERRED,
+            confidence=0.7,
+        )
+        assert edge.publicly_visible is False
+
+    def test_可明確覆寫預設公開狀態(self, event, two_nodes, doc):
+        """例如 stated 邊引用的文件之後被下架申訴撤下，
+        仍要能把它設為不公開。"""
+        a, b = two_nodes
+        edge = create_causal_edge(
+            event=event, from_node=a, to_node=b, kind=CausalKind.STATED,
+            citation_document=doc, publicly_visible=False,
+        )
+        assert edge.publicly_visible is False
+
     def test_資料庫CHECK繞不過(self, event, two_nodes):
         """M9 的核心保證：即使繞過 create_causal_edge 直接用 ORM 建立，
         資料庫仍拒絕沒有引用的 stated 邊——這就是選擇 CHECK constraint
@@ -208,3 +238,22 @@ class TestRecursiveTraversal:
 
     def test_不存在的起點回傳空清單(self, db):
         assert causal_descendants(999999) == []
+
+
+@pytest.mark.medium
+class TestCausalEdgePublicVisibility:
+    """任務 42、規格 M9：inferred 因果邊預設不公開的查詢層驗證。"""
+
+    def test_只回傳公開的邊(self, event, doc):
+        a = create_timeline_node(event=event, summary="檢方複訊被告", citation_document=doc)
+        b = create_timeline_node(event=event, summary="檢方起訴被告", citation_document=doc)
+        c = create_timeline_node(event=event, summary="法院裁定羈押", citation_document=doc)
+
+        stated = create_causal_edge(event=event, from_node=a, to_node=b,
+                                    kind=CausalKind.STATED, citation_document=doc)
+        inferred = create_causal_edge(event=event, from_node=b, to_node=c,
+                                      kind=CausalKind.INFERRED, confidence=0.6)
+
+        visible = CausalEdge.objects.publicly_visible()
+        assert stated in visible
+        assert inferred not in visible

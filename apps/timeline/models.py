@@ -91,6 +91,11 @@ class CausalKind(models.TextChoices):
     INFERRED = "inferred", "系統推論"
 
 
+class CausalEdgeQuerySet(models.QuerySet):
+    def publicly_visible(self):
+        return self.filter(publicly_visible=True)
+
+
 class CausalEdge(models.Model):
     """兩個時間線節點間的因果關係（任務 29、30，ADR-0003）。
 
@@ -122,7 +127,17 @@ class CausalEdge(models.Model):
         GenerationLog, null=True, blank=True, on_delete=models.SET_NULL,
         related_name="causal_edges")
 
+    #: inferred 邊預設不公開，須人工逐條勾選才顯示（規格 M9、任務 42）。
+    #: stated 邊在 ``create_causal_edge()`` 建立時預設為 True——
+    #: 它陳述的是報導明說、且強制附引用的事實，沒有「需要人工先看過
+    #: 才能公開」的理由；審核瓶頸該花在真正需要判斷的地方（inferred）。
+    #: 欄位本身不分 stated／inferred 皆可設定，是刻意的：即使是
+    #: stated 邊，人工事後仍可能因故把它撤下（如引用的文件被下架）。
+    publicly_visible = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = CausalEdgeQuerySet.as_manager()
 
     class Meta:
         constraints = [

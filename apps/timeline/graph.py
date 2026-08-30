@@ -61,12 +61,21 @@ def create_causal_edge(
     *, event, from_node: TimelineNode, to_node: TimelineNode, kind: str,
     is_final: bool = False, citation_document=None, citation_excerpt: str = "",
     confidence: float | None = None, generation=None,
+    publicly_visible: bool | None = None,
 ) -> CausalEdge:
     """建立因果邊。stated 邊需要 citation_document，inferred 邊需要
     confidence——這兩項資料庫層已用 CHECK constraint 強制，這裡提早
     在 Python 層擋下，讓錯誤訊息更明確（資料庫的 constraint 違反
     訊息不會告訴你「這是因為 kind=stated 卻沒給引用」，只會說
     constraint 名稱）。
+
+    Args:
+        publicly_visible: 不傳時依 ``kind`` 決定預設值——stated 邊
+            預設 True（陳述的是報導明說、且強制附引用的事實，沒有
+            「需要人工先看過才能公開」的理由），inferred 邊預設 False
+            （規格 M9、任務 42：inferred 因果邊預設不公開，須人工
+            逐條勾選才顯示）。傳入明確值可覆寫——例如某個 stated 邊
+            引用的文件之後被下架申訴撤下，仍要能把它設為不公開。
     """
     if kind == CausalKind.STATED and citation_document is None:
         raise ValueError("stated 邊必須提供 citation_document")
@@ -81,10 +90,14 @@ def create_causal_edge(
         if not result.passed:
             raise WordingRejected(result)
 
+    if publicly_visible is None:
+        publicly_visible = kind == CausalKind.STATED
+
     return CausalEdge.objects.create(
         event=event, from_node=from_node, to_node=to_node, kind=kind,
         citation_document=citation_document, citation_excerpt=citation_excerpt,
         confidence=confidence, generation=generation,
+        publicly_visible=publicly_visible,
     )
 
 
