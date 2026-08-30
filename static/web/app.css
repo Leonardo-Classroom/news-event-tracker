@@ -138,7 +138,7 @@ a:hover { text-decoration: underline; }
 .main { flex: 1; min-width: 0; padding: 18px 22px 60px; }
 
 .page-head {
-  display: flex; align-items: baseline; gap: 12px;
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
   margin-bottom: 14px; padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
