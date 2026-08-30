@@ -26,10 +26,11 @@ from django.utils import timezone
 
 from apps.events.assignment import identifier_match
 from apps.events.models import AssignmentMethod, Event, EventDocument, EventStatus
+from apps.ingest.adapters.base import ParsedDocument
 from apps.ingest.adapters.judicial import JudicialAdapter
 from apps.ingest.models import ContentClass, Document, Source
 
-__all__ = ["JudgmentIngestResult", "ingest_judgment"]
+__all__ = ["JudgmentIngestResult", "ingest_judgment", "ingest_parsed_judgment"]
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +49,32 @@ def ingest_judgment(
 ) -> JudgmentIngestResult:
     """解析一份裁判書頁面、入庫，並嘗試以案號接回既有事件。
 
+    公開查詢介面（單筆 HTML 頁面）專用的入口——解析後委派給
+    ``ingest_parsed_judgment``，實際的入庫與接回邏輯只寫一份，供
+    月封存檔（JSON 逐案）與這裡（HTML 逐案）共用，見該函式的說明。
+    """
+    parsed = JudicialAdapter().list_documents(html, base_url=url)
+    if not parsed:
+        return JudgmentIngestResult(error="無法從頁面解析出案號，未建立文件")
+    return ingest_parsed_judgment(parsed[0], source=source, candidate_events=candidate_events)
+
+
+def ingest_parsed_judgment(
+    item: ParsedDocument, *, source: Source, candidate_events: list[Event] | None = None,
+) -> JudgmentIngestResult:
+    """把已解析的裁判書（``ParsedDocument``）入庫，並嘗試以案號接回事件。
+
+    **這是入庫邏輯唯一的實作**——單筆查詢（HTML 解析）與月封存檔
+    （JSON 逐案）兩種來源格式不同，但入庫、案號比對、喚醒事件這段
+    邏輯完全一樣，拆成兩份遲早會分岔（例如某天只在其中一處修正了
+    喚醒條件的 bug）。兩種來源各自的 adapter 只負責解析成
+    ``ParsedDocument``，之後全部走這裡。
+
     Args:
         candidate_events: 案號比對的候選集合。預設為全部追蹤中
             （active／dormant）的事件——裁判書要能喚醒 dormant 事件
             正是任務 37 的核心價值，若只比對 active 就會漏掉這個情境。
     """
-    parsed = JudicialAdapter().list_documents(html, base_url=url)
-    if not parsed:
-        return JudgmentIngestResult(error="無法從頁面解析出案號，未建立文件")
-
-    item = parsed[0]
-
     with transaction.atomic():
         document, created = Document.objects.update_or_create(
             url=item.url,

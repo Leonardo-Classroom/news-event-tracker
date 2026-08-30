@@ -30,7 +30,8 @@
     <tr>
       <td class="num tight">{{ doc.published_at|date:"Y-m-d"|default:"—" }}</td>
       <td class="tight">{{ doc.source.name }}</td>
-      <td><a href="{% url 'web:document_detail' doc.pk %}">{{ doc.title }}</a></td>
+      <td><a href="{% url 'web:document_detail' doc.pk %}">{{ doc.title }}</a>
+        <a href="{{ doc.url }}" target="_blank" rel="noopener" title="開啟原文" style="color:var(--text-3);margin-left:4px">↗</a></td>
       <td class="tight">
         {% if doc.relevant %}<span class="tag ok">相關</span>{% endif %}
         {% if doc.case_numbers %}<span class="tag accent">案號</span>{% endif %}

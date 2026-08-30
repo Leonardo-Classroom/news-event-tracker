@@ -39,4 +39,13 @@ app.conf.beat_schedule = {
         "schedule": 3600.0,         # 每小時歸併轉載
         "options": {"queue": "fetch"},
     },
+    "check-official-records": {
+        "task": "apps.events.tasks.check_official_records",
+        # 任務 27：active／dormant 事件的官方源檢查頻率皆為每日一次，
+        # 沉寂事件刻意不降頻（新聞沉寂期正是判決出爐的時期）。
+        # Beat 本身排更密（4 小時）只是「檢查誰到期」，實際頻率仍由
+        # Event.due_for_official_check() 決定，同一天內只會真的執行一次。
+        "schedule": 14400.0,
+        "options": {"queue": "fetch"},
+    },
 }
