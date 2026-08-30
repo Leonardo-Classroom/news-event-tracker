@@ -6,9 +6,10 @@
 
 頁面因此對應工作而非資料表：
 
-    /            追蹤中的事件
-    /e/<slug>/   單一事件的時間線（核心畫面）
-    /review/     待審核的事件（Scope 6 的入口）
+    /                追蹤中的事件
+    /e/<slug>/       單一事件的時間線（核心畫面）
+    /review/         待審核佇列（高風險逐條、中低風險可批次）
+    /review/<slug>/  單一事件審核
     /documents/  文件檢索
     /pipeline/   管線狀態與來源健康度
     /crawlers/   爬蟲排程與手動觸發
@@ -20,14 +21,16 @@ import datetime as dt
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Count, F, Max, Min, Q, Sum
+from django.db.models import Case, Count, F, IntegerField, Max, Min, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.events.models import (
-    DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus,
+    DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus, InvalidTransition,
+    RiskTier, WordingGateFailed,
 )
+from apps.review.service import ReviewError, approve, batch_approve, reject
 from apps.ingest.models import Document, ExternalSession, Source
 from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, should_poll
 from apps.ingest.tasks import dispatch_poll
@@ -112,17 +115,163 @@ def event_detail(request, slug):
         "span_months": span_months,
         "silent_months": max(0, span_months - months),
         "sources": links.values("document__source__slug").distinct().count(),
+        "pending_review": event.status in (EventStatus.CANDIDATE, EventStatus.DRAFT),
     })
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def event_publish(request, slug):
+    """把已 active 的事件公開。審核通過但先留在內部的事件走這條路。"""
+    event = get_object_or_404(Event, slug=slug)
+    try:
+        event.publish()
+        messages.success(request, f"已公開「{event.title}」")
+    except (WordingGateFailed, InvalidTransition) as exc:
+        messages.error(request, _exc_message(exc))
+    return redirect("web:event_detail", slug=event.slug)
 
 
 @require_role(Role.USER)
 def review(request):
-    """待審核的事件。Scope 6 的安全閘門將接在此處。"""
+    """待審核佇列。高風險排最前——那些不能批次、也不能略過。"""
     pending = (Event.objects
                .filter(status__in=[EventStatus.CANDIDATE, EventStatus.DRAFT])
-               .annotate(doc_count=Count("event_documents"))
-               .order_by("-created_at"))
-    return render(request, "web/review.html", {"nav": "review", "events": pending})
+               .annotate(
+                   doc_count=Count("event_documents"),
+                   risk_order=Case(
+                       When(risk_tier=RiskTier.HIGH, then=Value(0)),
+                       When(risk_tier=RiskTier.MEDIUM, then=Value(1)),
+                       default=Value(2),
+                       output_field=IntegerField(),
+                   ),
+               )
+               .order_by("risk_order", "-created_at"))
+    return render(request, "web/review.html", {
+        "nav": "review",
+        "events": pending,
+        "batchable_count": sum(1 for e in pending if e.allows_batch_review),
+    })
+
+
+@require_role(Role.USER)
+def review_detail(request, slug):
+    """單一事件的審核頁。高風險在這裡逐條確認；中低風險看標題與摘要即可。"""
+    event = get_object_or_404(Event, slug=slug)
+    if event.status not in (EventStatus.CANDIDATE, EventStatus.DRAFT):
+        messages.info(request, "此事件不在待審核佇列")
+        return redirect("web:event_detail", slug=event.slug)
+
+    from apps.compliance.wording import check_wording
+
+    is_final = event.risk_tier != RiskTier.HIGH
+    wording_rows = []
+    for key, label, text in (
+        ("title", "標題", event.title),
+        ("summary", "摘要", event.summary),
+        ("current_status_text", "目前進度", event.current_status_text),
+    ):
+        if key != "title" and not text:
+            continue
+        result = check_wording(text, is_final=is_final) if text else None
+        wording_rows.append({
+            "key": key, "label": label, "text": text,
+            "passed": True if result is None else result.passed,
+            "reasons": [] if result is None or result.passed
+                       else [v.reason for v in result.violations],
+        })
+
+    documents = (EventDocument.objects
+                 .filter(event=event)
+                 .select_related("document", "document__source")
+                 .order_by(F("document__published_at").desc(nulls_last=True)))
+    nodes = event.timeline_nodes.select_related("citation_document").all()
+
+    return render(request, "web/review_detail.html", {
+        "nav": "review", "event": event,
+        "wording_rows": wording_rows,
+        "documents": documents,
+        "nodes": nodes,
+        "high_risk": event.risk_tier == RiskTier.HIGH,
+    })
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def review_decide(request, slug):
+    event = get_object_or_404(Event, slug=slug)
+    action = request.POST.get("action", "")
+    try:
+        if action == "reject":
+            reject(event)
+            messages.success(request, f"已駁回「{event.title}」")
+            return redirect("web:review")
+        if action in ("approve", "approve_publish"):
+            approve(
+                event,
+                confirmed_wording=set(request.POST.getlist("wording")),
+                confirmed_documents=_int_set(request.POST.getlist("document_ids")),
+                confirmed_nodes=_int_set(request.POST.getlist("node_ids")),
+                publish=(action == "approve_publish"),
+            )
+            if action == "approve_publish":
+                messages.success(request, f"已通過並公開「{event.title}」")
+            else:
+                messages.success(request, f"已通過「{event.title}」（內部追蹤，未公開）")
+            return redirect("web:event_detail", slug=event.slug)
+        messages.error(request, "未知的審核動作")
+    except ReviewError as exc:
+        messages.error(request, str(exc))
+        if event.pk:
+            event.refresh_from_db()
+        if event.status in (EventStatus.CANDIDATE, EventStatus.DRAFT):
+            return redirect("web:review_detail", slug=event.slug)
+        return redirect("web:event_detail", slug=event.slug)
+    return redirect("web:review")
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def review_batch(request):
+    ids = _int_set(request.POST.getlist("event_ids"))
+    if not ids:
+        messages.error(request, "沒有選取事件")
+        return redirect("web:review")
+    pending = Event.objects.filter(
+        pk__in=ids, status__in=[EventStatus.CANDIDATE, EventStatus.DRAFT])
+    result = batch_approve(pending)
+    parts = []
+    if result.approved:
+        parts.append(f"已通過 {len(result.approved)} 件（內部追蹤）")
+    if result.skipped_high:
+        parts.append(f"{len(result.skipped_high)} 件高風險已跳過，須逐條確認")
+    if result.blocked:
+        parts.append(f"{len(result.blocked)} 件未通過："
+                     + "；".join(f"{e.title}（{why}）" for e, why in result.blocked))
+    if not parts:
+        messages.error(request, "沒有可批次通過的事件")
+    elif result.blocked or result.skipped_high:
+        messages.error(request, "。".join(parts))
+    else:
+        messages.success(request, "。".join(parts))
+    return redirect("web:review")
+
+
+def _int_set(values) -> set[int]:
+    out: set[int] = set()
+    for raw in values:
+        try:
+            out.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _exc_message(exc: BaseException) -> str:
+    msgs = getattr(exc, "messages", None)
+    if msgs:
+        return msgs[0]
+    return str(exc)
 
 
 @require_role(Role.USER)

@@ -7,8 +7,16 @@
   {% elif event.status == 'dormant' %}<span class="tag warn">沉寂</span>
   {% elif event.status == 'closed' %}<span class="tag muted">已結案</span>
   {% else %}<span class="tag accent">{{ event.get_status_display }}</span>{% endif %}
-  {% if event.visibility == 'private' %}<span class="tag muted">未公開</span>{% endif %}
+  {% if event.visibility == 'private' %}<span class="tag muted">未公開</span>
+  {% elif event.visibility == 'public' %}<span class="tag ok">已公開</span>{% endif %}
   <span class="spacer"></span>
+  {% if pending_review %}
+    <a href="{% url 'web:review_detail' event.slug %}" class="btn primary">審核此事件</a>
+  {% elif event.status == 'active' and event.visibility == 'private' and request.user.is_staff %}
+    <form method="post" action="{% url 'web:event_publish' event.slug %}">{% csrf_token %}
+      <button class="btn primary">公開此事件</button>
+    </form>
+  {% endif %}
   <a href="/admin/events/event/{{ event.pk }}/change/" class="sub">在 admin 編輯</a>
 </div>
 

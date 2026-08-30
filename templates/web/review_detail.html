@@ -1,0 +1,102 @@
+{% extends "web/base.html" %}
+{% block title %}審核：{{ event.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ event.title }}</h1>
+  <span class="tag accent">{{ event.get_status_display }}</span>
+  {% if event.risk_tier == 'high' %}<span class="tag danger">高風險</span>
+  {% elif event.risk_tier == 'medium' %}<span class="tag warn">中風險</span>
+  {% else %}<span class="tag muted">低風險</span>{% endif %}
+  <span class="spacer"></span>
+  <a href="{% url 'web:review' %}" class="sub">返回佇列</a>
+</div>
+
+{% if high_risk %}
+<div class="card">
+  <div class="body" style="font-size:12px;color:var(--text-2);background:var(--danger-bg);border-left:3px solid var(--danger)">
+    高風險：具名自然人且案件未判決確定。必須逐條確認措辭與時間線，不能批次通過。
+    漏勾任何一項，送出會被拒絕——這是服務層強制，不是畫面上的提示。
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="body" style="font-size:12px;color:var(--text-2);background:var(--ok-bg);border-left:3px solid var(--ok)">
+    中低風險：確認標題與摘要無誤即可通過。點「通過」就是形式確認。
+  </div>
+</div>
+{% endif %}
+
+<form method="post" action="{% url 'web:review_decide' event.slug %}">
+{% csrf_token %}
+
+<div class="card">
+  <h2>措辭{% if high_risk %}（須逐項勾選）{% endif %}</h2>
+  <div class="body">
+    {% for row in wording_rows %}
+      <label class="check-row">
+        {% if high_risk %}<input type="checkbox" name="wording" value="{{ row.key }}">{% endif %}
+        <span>
+          <b>{{ row.label }}</b>
+          {% if not row.passed %}<span class="tag danger">措辭未過</span>{% endif %}
+          <div class="body-text" style="margin-top:4px">{% if row.text %}{{ row.text }}{% else %}<span class="empty" style="padding:0">（空白）</span>{% endif %}</div>
+          {% for reason in row.reasons %}
+            <div style="font-size:12px;color:var(--danger);margin-top:4px">{{ reason }}</div>
+          {% endfor %}
+        </span>
+      </label>
+    {% endfor %}
+    <div style="font-size:11px;color:var(--text-3);margin-top:8px">
+      文字不對請先到
+      <a href="/admin/events/event/{{ event.pk }}/change/">Django admin</a>
+      修改後再回來。沒有繞過措辭閘門的選項。
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>時間線文件{% if high_risk %}（須逐篇勾選）{% endif %}
+    <span style="font-weight:400;color:var(--text-3)">　{{ documents|length }} 篇</span></h2>
+  <div class="body">
+    {% for link in documents %}
+      <label class="check-row">
+        {% if high_risk %}<input type="checkbox" name="document_ids" value="{{ link.document_id }}">{% endif %}
+        <span>
+          <div class="tl-date">{{ link.document.published_at|date:"Y-m-d H:i"|default:"日期不明" }}</div>
+          <div class="tl-title"><a href="{% url 'web:document_detail' link.document.pk %}">{{ link.document.title }}</a></div>
+          <div class="tl-meta">{{ link.document.source.name }} · {{ link.get_method_display }}</div>
+        </span>
+      </label>
+    {% empty %}
+      <div class="empty" style="padding:12px">尚無文件</div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if nodes %}
+<div class="card">
+  <h2>時間線節點{% if high_risk %}（須逐則勾選）{% endif %}
+    <span style="font-weight:400;color:var(--text-3)">　{{ nodes|length }} 則</span></h2>
+  <div class="body">
+    {% for node in nodes %}
+      <label class="check-row">
+        {% if high_risk %}<input type="checkbox" name="node_ids" value="{{ node.pk }}">{% endif %}
+        <span>
+          <div class="tl-date">{{ node.occurred_on|date:"Y-m-d"|default:"日期未載明" }}</div>
+          <div class="tl-title">{{ node.summary }}</div>
+          <div class="tl-meta">出處：{{ node.citation_document.title }}</div>
+        </span>
+      </label>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if request.user.is_staff %}
+<div class="review-actions">
+  <button class="btn primary" name="action" value="approve">通過（內部追蹤）</button>
+  <button class="btn" name="action" value="approve_publish">通過並公開</button>
+  <button class="btn danger" name="action" value="reject">駁回</button>
+</div>
+{% endif %}
+</form>
+{% endblock %}

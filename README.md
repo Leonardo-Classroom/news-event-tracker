@@ -55,7 +55,7 @@ scripts/run_job.sh embed embed_documents    # 啟動可追蹤的背景作業
 
     /            追蹤中的事件
     /e/<slug>/   單一事件的時間線（核心畫面，會標示報導空白期）
-    /review/     待審核的事件
+    /review/     待審核的事件（高風險逐條確認，中低風險可批次通過）
     /documents/  文件檢索
     /pipeline/   管線狀態與來源健康度
     /costs/      LLM 用量與成本

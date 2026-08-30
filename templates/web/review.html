@@ -1,22 +1,30 @@
 {% extends "web/base.html" %}
 {% block title %}待審核{% endblock %}
 {% block content %}
-<div class="page-head"><h1>待審核</h1><span class="sub">{{ events|length }} 個</span></div>
+<div class="page-head">
+  <h1>待審核</h1>
+  <span class="sub">{{ events|length }} 個 · 高風險須逐條確認，中低風險可批次通過</span>
+</div>
 
 <div class="card">
-  <div class="body" style="font-size:12px;color:var(--text-2);background:var(--warn-bg);border-left:3px solid var(--warn)">
-    <b>審核閘門尚未實作（Scope 6）。</b>
-    規格要求：人工審核僅做形式確認，因此安全性由自動閘門承擔——
-    措辭檢查器為不可繞過的 blocking gate、風險分級自動判定、
-    inferred 因果預設不公開。
-    <b>在這些完成前，任何事件都不應對外公開。</b>
+  <div class="body" style="font-size:12px;color:var(--text-2);background:var(--accent-bg);border-left:3px solid var(--accent)">
+    人工審核只做形式確認。安全性由自動閘門承擔：措辭檢查不可繞過、風險分級由抽取結果判定、inferred 因果邊預設不公開。
+    通過後事件進入內部追蹤，不會自動出現在公開頁——公開是另一次明確動作。
   </div>
 </div>
 
+<form id="batch-form" method="post" action="{% url 'web:review_batch' %}">{% csrf_token %}</form>
+
 <div class="card"><div class="table-scroll"><table>
-  <thead><tr><th>事件</th><th>狀態</th><th>風險</th><th class="num">文件</th><th class="num">建立</th></tr></thead>
+  <thead><tr>
+    <th>{% if batchable_count %}<input type="checkbox" id="check-all" title="全選中低風險">{% endif %}</th>
+    <th>事件</th><th>狀態</th><th>風險</th><th class="num">文件</th><th class="num">建立</th><th></th>
+  </tr></thead>
   <tbody>{% for e in events %}<tr>
-    <td><a href="{% url 'web:event_detail' e.slug %}">{{ e.title }}</a></td>
+    <td>{% if e.allows_batch_review %}
+      <input form="batch-form" type="checkbox" name="event_ids" value="{{ e.pk }}" class="batch-item">
+    {% endif %}</td>
+    <td><a href="{% url 'web:review_detail' e.slug %}">{{ e.title }}</a></td>
     <td class="tight"><span class="tag accent">{{ e.get_status_display }}</span></td>
     <td class="tight">
       {% if e.risk_tier == 'high' %}<span class="tag danger">高</span>
@@ -24,8 +32,39 @@
       {% else %}<span class="tag muted">低</span>{% endif %}</td>
     <td class="num">{{ e.doc_count }}</td>
     <td class="num tight">{{ e.created_at|date:"Y-m-d" }}</td>
+    <td class="tight">
+      {% if e.risk_tier == 'high' %}
+        <a href="{% url 'web:review_detail' e.slug %}" class="btn">逐條審核</a>
+      {% elif request.user.is_staff %}
+        <form method="post" action="{% url 'web:review_decide' e.slug %}" class="chips">
+          {% csrf_token %}
+          <button class="btn primary" name="action" value="approve">通過</button>
+          <button class="btn danger" name="action" value="reject">駁回</button>
+        </form>
+      {% else %}
+        <a href="{% url 'web:review_detail' e.slug %}">查看</a>
+      {% endif %}
+    </td>
   </tr>{% empty %}
-    <tr><td colspan="5" class="empty">沒有待審核的事件</td></tr>
+    <tr><td colspan="7" class="empty">沒有待審核的事件</td></tr>
   {% endfor %}</tbody>
-</table></div></div>
+</table></div>
+{% if batchable_count and request.user.is_staff %}
+<div class="body" style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--border)">
+  <button form="batch-form" class="btn primary">批次通過所選（{{ batchable_count }} 件中低風險可選）</button>
+  <span style="font-size:11px;color:var(--text-3)">高風險不在此列，即使被加進 POST 也會被拒絕</span>
+</div>
+{% endif %}
+</div>
+{% if batchable_count %}
+<script>
+(function () {
+  var all = document.getElementById("check-all");
+  if (!all) return;
+  all.addEventListener("change", function () {
+    document.querySelectorAll(".batch-item").forEach(function (el) { el.checked = all.checked; });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
