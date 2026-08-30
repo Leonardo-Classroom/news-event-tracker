@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.llm",
     "apps.timeline",
     "apps.web",
+    "apps.public",
 ]
 
 MIDDLEWARE = [

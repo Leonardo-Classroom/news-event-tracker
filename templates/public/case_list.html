@@ -1,0 +1,30 @@
+{% extends "public/base.html" %}
+{% block title %}持續追蹤中的案件{% endblock %}
+{% block content %}
+{% for event in page %}
+  <div class="case-card">
+    <div class="status-line">
+      {% if event.status == 'active' %}<span class="tag active">追蹤中</span>
+      {% elif event.status == 'dormant' %}<span class="tag dormant">沉寂中，官方源持續監測</span>
+      {% elif event.status == 'closed' %}<span class="tag closed">已結案</span>{% endif %}
+      {% if event.last_progress_at %}　最後進展：{{ event.last_progress_at|date:"Y年n月j日" }}{% endif %}
+    </div>
+    <h2><a href="{% url 'public:case_detail' event.slug %}">{{ event.title }}</a></h2>
+    {% if event.current_status_text %}<p class="progress">{{ event.current_status_text }}</p>{% endif %}
+  </div>
+{% empty %}
+  <div class="empty">目前沒有公開追蹤中的案件。</div>
+{% endfor %}
+
+{% if page.paginator.num_pages > 1 %}
+<div class="pager">
+  {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">‹ 上一頁</a>{% endif %}
+  {% for num in page_range %}
+    {% if num == page.paginator.ELLIPSIS %}<span>…</span>
+    {% elif num == page.number %}<span class="current">{{ num }}</span>
+    {% else %}<a href="?page={{ num }}">{{ num }}</a>{% endif %}
+  {% endfor %}
+  {% if page.has_next %}<a href="?page={{ page.next_page_number }}">下一頁 ›</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

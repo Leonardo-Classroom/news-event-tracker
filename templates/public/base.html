@@ -1,0 +1,34 @@
+{% load static %}<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{# Django 模板不支援 Jinja2 的 self.blockname 語法，描述文字無法在
+   多個 block 之間共用同一份預設值，因此各頁面各自 override description
+   與 og_description 兩者（見 case_detail.html）——維護時要記得同步改。 #}
+<title>{% block title %}案件追蹤{% endblock %}｜新聞事件追蹤</title>
+<meta name="description" content="{% block description %}持續追蹤台灣重大司法案件與政商弊案的後續進展，新聞停止報導後，我們接續追下去。{% endblock %}">
+<link rel="canonical" href="{{ request.build_absolute_uri }}">
+
+{# Open Graph／社群分享預覽——分享到 LINE、Facebook 時顯示的卡片 #}
+<meta property="og:site_name" content="新聞事件追蹤">
+<meta property="og:type" content="{% block og_type %}website{% endblock %}">
+<meta property="og:title" content="{% block og_title %}新聞事件追蹤{% endblock %}">
+<meta property="og:description" content="{% block og_description %}持續追蹤台灣重大司法案件與政商弊案的後續進展，新聞停止報導後，我們接續追下去。{% endblock %}">
+<meta property="og:url" content="{{ request.build_absolute_uri }}">
+<meta name="twitter:card" content="summary">
+
+{% block schema_org %}{% endblock %}
+
+<link rel="stylesheet" href="{% static 'public/app.css' %}">
+</head>
+<body>
+<header class="masthead">
+  <p class="name"><a href="{% url 'public:case_list' %}" style="color:inherit">新聞事件追蹤</a></p>
+  <p class="tagline">新聞停了，追蹤沒停——持續追蹤台灣重大司法案件與政商弊案的後續進展</p>
+</header>
+<div class="wrap">
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

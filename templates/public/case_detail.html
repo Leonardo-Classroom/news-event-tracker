@@ -1,0 +1,68 @@
+{% extends "public/base.html" %}
+{% block title %}{{ event.title }}{% endblock %}
+{% block description %}{{ event.current_status_text|default:event.summary|truncatechars:120 }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ event.title }}{% endblock %}
+{% block og_description %}{{ event.current_status_text|default:event.summary|truncatechars:120 }}{% endblock %}
+
+{% block schema_org %}
+<script type="application/ld+json">{{ ld_json|safe }}</script>
+{% endblock %}
+
+{% block content %}
+<article>
+  <div class="case-head">
+    <div class="status-line">
+      {% if event.status == 'active' %}<span class="tag active">追蹤中</span>
+      {% elif event.status == 'dormant' %}<span class="tag dormant">沉寂中，官方源持續監測</span>
+      {% elif event.status == 'closed' %}<span class="tag closed">已結案</span>{% endif %}
+      {% if event.last_progress_at %}　最後更新：{{ event.last_progress_at|date:"Y年n月j日" }}{% endif %}
+    </div>
+    <h1>{{ event.title }}</h1>
+    {% if event.current_status_text %}
+    <div class="progress-box">
+      <div class="label">目前進度</div>
+      {{ event.current_status_text }}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if event.summary %}<p class="summary">{{ event.summary }}</p>{% endif %}
+
+  {% if timeline %}
+  <h2 class="section-title">時間線</h2>
+  {% for item in timeline %}
+    <div class="timeline-item">
+      <div class="date">{{ item.node.occurred_on|date:"Y-m-d"|default:"日期未載明" }}</div>
+      <div class="body">
+        <div class="fact">{{ item.node.summary }}</div>
+        {% if item.citation.url %}
+          <a class="source-link" href="{{ item.citation.url }}" target="_blank" rel="noopener nofollow">
+            出處：{{ item.citation.source }}「{{ item.citation.title|truncatechars:32 }}」↗
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if causal_edges %}
+  <h2 class="section-title">事件關聯</h2>
+  {% for edge in causal_edges %}
+    <div class="causal-item">
+      {% if edge.kind == 'stated' %}<span class="tag active kind-tag">報導明述</span>
+      {% else %}<span class="tag dormant kind-tag">系統推論（信心 {{ edge.confidence|floatformat:0 }}%）</span>{% endif %}
+      {{ edge.from_node.summary }} → {{ edge.to_node.summary }}
+    </div>
+  {% endfor %}
+  {% endif %}
+
+  <div class="footer-note">
+    <p><strong>關於本頁：</strong>本頁僅呈現本站自製之事實摘要與時間線，
+      不轉載新聞原文；每則時間線項目皆附可查證的原始出處連結。
+      涉及尚未判決確定之當事人，一律以「被起訴」「被控」等程序性用語
+      呈現，不作有罪推定之描述。「系統推論」類的關聯為本站依既有資訊
+      推測，非報導或官方文件明確陳述，僅供參考。</p>
+  </div>
+</article>
+{% endblock %}
