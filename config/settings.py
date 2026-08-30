@@ -64,7 +64,14 @@ ROOT_URLCONF = "config.urls"
 
 # login_required 預設導向 /accounts/login/，而本專案沒有該路徑——
 # 未設定會讓所有需登入的頁面回 404，而非導向登入頁。
-LOGIN_URL = "/admin/login/"
+# **不用 /admin/login/**——Django admin 的登入表單刻意限制
+# is_staff=True 才能登入（AdminAuthenticationForm.clean 的內建行為），
+# 這是正確的（/admin/ 本來就該只給工作人員），但代表一般 user 角色
+# 的帳號永遠無法通過那個表單登入。內部工具需要三個角色都能登入，
+# 因此改用一般的 django.contrib.auth 登入頁（apps/web/urls.py 的
+# /login/），只檢查帳號密碼與 is_active，角色高低留給
+# apps.web.permissions.require_role 在各別視圖層判斷。
+LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 WSGI_APPLICATION = "config.wsgi.application"
 

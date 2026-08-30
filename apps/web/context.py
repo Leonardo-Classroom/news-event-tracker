@@ -7,7 +7,9 @@ from decimal import Decimal
 
 
 def sidebar(request):
-    if not request.path.startswith("/") or request.path.startswith("/admin"):
+    if request.path.startswith("/admin") or not request.user.is_authenticated:
+        # 未登入時（如 /login/ 頁）側欄本來就不會顯示，算這些數字
+        # 只是白白多跑幾次查詢。
         return {}
     from apps.events.models import Event, EventStatus
     from apps.ingest.models import Document, Source

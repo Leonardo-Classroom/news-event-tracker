@@ -1,0 +1,13 @@
+{% extends "web/base.html" %}
+{% block title %}權限不足{% endblock %}
+{% block content %}
+<div class="page-head"><h1>權限不足</h1></div>
+<div class="card"><div class="body">
+  <p>{{ exception|default:"此操作需要更高的權限。" }}</p>
+  <p style="color:var(--text-3);font-size:12px">
+    這不是登入問題——你已經登入，但目前帳號的角色不夠存取這個頁面或動作。
+    如需要更高權限，請聯絡系統管理員調整帳號設定。
+  </p>
+  <a class="btn" href="{% url 'web:events' %}">回首頁</a>
+</div></div>
+{% endblock %}

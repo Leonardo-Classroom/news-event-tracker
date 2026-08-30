@@ -1,0 +1,30 @@
+{% extends "web/base.html" %}
+{% block title %}登入{% endblock %}
+{% block content %}
+<div style="max-width:320px;margin:60px auto">
+  <div class="brand" style="border:none;padding:0 0 18px;text-align:center">
+    <b style="font-size:16px">新聞事件追蹤</b>
+    <span>新聞停了，追蹤沒停</span>
+  </div>
+  <div class="card"><div class="body">
+    {% if form.errors %}
+      <div class="tag danger" style="display:block;margin-bottom:12px;padding:6px 10px">
+        帳號或密碼錯誤
+      </div>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:4px">帳號</label>
+        <input type="text" name="username" autofocus required style="width:100%">
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:4px">密碼</label>
+        <input type="password" name="password" required style="width:100%">
+      </div>
+      <button class="btn primary" style="width:100%">登入</button>
+    </form>
+  </div></div>
+</div>
+{% endblock %}

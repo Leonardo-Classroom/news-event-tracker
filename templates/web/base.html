@@ -8,6 +8,7 @@
 </head>
 <body>
 <div class="shell">
+  {% if request.user.is_authenticated %}
   <nav class="sidebar">
     <div class="brand">
       <b>新聞事件追蹤</b>
@@ -27,16 +28,31 @@
           文件<span class="count">{{ nav_counts.documents }}</span></a>
         <a href="{% url 'web:pipeline' %}" class="{% if nav == 'pipeline' %}active{% endif %}">
           管線狀態{% if nav_counts.unhealthy %}<span class="count" style="color:var(--danger)">{{ nav_counts.unhealthy }}</span>{% endif %}</a>
-        <a href="{% url 'web:crawlers' %}" class="{% if nav == 'crawlers' %}active{% endif %}">爬蟲</a>
+        {% if request.user.is_staff %}<a href="{% url 'web:crawlers' %}" class="{% if nav == 'crawlers' %}active{% endif %}">爬蟲</a>{% endif %}
       </div>
+      {% if request.user.is_staff %}
       <div class="nav-group">
         <h6>系統</h6>
         <a href="{% url 'web:costs' %}" class="{% if nav == 'costs' %}active{% endif %}">
           LLM 用量<span class="count">${{ nav_counts.spent }}</span></a>
         <a href="/admin/">Django 後台</a>
       </div>
+      {% endif %}
+      <div class="nav-group">
+        <h6>帳號</h6>
+        <span style="display:block;padding:5px 14px;color:var(--text-3);font-size:11px">
+          {{ request.user.username }}
+          {% if request.user.is_superuser %}（超級管理員）
+          {% elif request.user.is_staff %}（管理員）
+          {% else %}（一般使用者）{% endif %}
+        </span>
+        <form method="post" action="{% url 'web:logout' %}">{% csrf_token %}
+          <button type="submit" style="background:none;border:none;padding:5px 14px;color:var(--text-2);cursor:pointer;font:inherit;text-align:left;width:100%">登出</button>
+        </form>
+      </div>
     </div>
   </nav>
+  {% endif %}
   <main class="main">
     {% if messages %}
       <div class="chips" style="margin-bottom:14px">

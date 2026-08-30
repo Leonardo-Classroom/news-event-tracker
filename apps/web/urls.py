@@ -1,3 +1,4 @@
+from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from apps.web import views
@@ -5,6 +6,12 @@ from apps.web import views
 app_name = "web"
 
 urlpatterns = [
+    # 一般登入頁，供三個角色（user／admin／superadmin）共用——
+    # 不能用 /admin/login/，那個表單刻意限制只有 is_staff 才能登入
+    # （見 config/settings.py 的 LOGIN_URL 說明）。
+    path("login/", auth_views.LoginView.as_view(template_name="web/login.html"),
+        name="login"),
+    path("logout/", auth_views.LogoutView.as_view(next_page="web:login"), name="logout"),
     path("", views.events, name="events"),
     path("e/<slug:slug>/", views.event_detail, name="event_detail"),
     path("review/", views.review, name="review"),

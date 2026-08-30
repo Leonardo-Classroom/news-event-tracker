@@ -93,11 +93,15 @@ class TestWebInterface:
 
     def test_未登入導向登入頁而非_404(self, db):
         """LOGIN_URL 未設定時，login_required 會導向不存在的
-        /accounts/login/ 而回 404——所有頁面看起來都壞掉。"""
+        /accounts/login/ 而回 404——所有頁面看起來都壞掉。
+
+        LOGIN_URL 指向 /login/ 而非 /admin/login/——後者的表單刻意
+        限制只有 is_staff 才能登入，一般 user 角色的帳號永遠無法
+        通過那個表單，見 apps/web/permissions.py 的角色設計。"""
         from django.test import Client
         response = Client().get("/")
         assert response.status_code == 302
-        assert "/admin/login/" in response["Location"]
+        assert "/login/" in response["Location"]
 
     def test_事件詳情顯示時間線與空白期(self, admin_client, source, db):
         """空白期的呈現是本系統的核心價值——規格 §2.1 的問題陳述是

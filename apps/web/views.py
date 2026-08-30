@@ -19,7 +19,6 @@ from __future__ import annotations
 import datetime as dt
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, F, Max, Min, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
@@ -34,13 +33,14 @@ from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, 
 from apps.ingest.tasks import dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
 from apps.llm.models import LlmPurpose, LlmUsage
+from apps.web.permissions import Role, require_role
 
 #: 時間線上超過此天數的間隔會被標示為「空白期」。
 #: 這是本系統的價值所在——「新聞停了」本身就是資訊，不該被壓縮掉。
 GAP_HIGHLIGHT_DAYS = 45
 
 
-@login_required
+@require_role(Role.USER)
 def events(request):
     """追蹤中的事件。首頁——事件是本系統的核心物件。"""
     status = request.GET.get("status", "")
@@ -66,7 +66,7 @@ def events(request):
     })
 
 
-@login_required
+@require_role(Role.USER)
 def event_detail(request, slug):
     """單一事件的時間線。**這是本系統最核心的畫面。**
 
@@ -115,7 +115,7 @@ def event_detail(request, slug):
     })
 
 
-@login_required
+@require_role(Role.USER)
 def review(request):
     """待審核的事件。Scope 6 的安全閘門將接在此處。"""
     pending = (Event.objects
@@ -125,7 +125,7 @@ def review(request):
     return render(request, "web/review.html", {"nav": "review", "events": pending})
 
 
-@login_required
+@require_role(Role.USER)
 def documents(request):
     """文件檢索。搜尋走 bigram FTS 的 GIN 索引（ADR-0001）。"""
     query = request.GET.get("q", "").strip()
@@ -162,7 +162,7 @@ def documents(request):
     })
 
 
-@login_required
+@require_role(Role.USER)
 def document_detail(request, pk):
     doc = get_object_or_404(
         Document.objects.select_related("source", "canonical_of"), pk=pk)
@@ -173,7 +173,7 @@ def document_detail(request, pk):
     })
 
 
-@login_required
+@require_role(Role.USER)
 def pipeline(request):
     """管線狀態。
 
@@ -227,7 +227,7 @@ EXTERNAL_SESSIONS = {
 }
 
 
-@login_required
+@require_role(Role.ADMIN)
 def crawlers(request):
     """爬蟲排程設定與手動觸發。
 
@@ -256,7 +256,7 @@ def crawlers(request):
     })
 
 
-@login_required
+@require_role(Role.ADMIN)
 @require_POST
 def save_external_session(request, slug):
     """儲存人工登入後取得的 session cookie。
@@ -279,7 +279,7 @@ def save_external_session(request, slug):
     return redirect("web:crawlers")
 
 
-@login_required
+@require_role(Role.ADMIN)
 @require_POST
 def crawler_run(request, slug):
     """手動觸發單一來源立即爬取一次。
@@ -295,7 +295,7 @@ def crawler_run(request, slug):
     return redirect("web:crawlers")
 
 
-@login_required
+@require_role(Role.ADMIN)
 @require_POST
 def crawler_update(request, slug):
     """更新單一來源的排程參數：多久爬一次、可用時段。"""
@@ -336,7 +336,7 @@ def crawler_update(request, slug):
     return redirect("web:crawlers")
 
 
-@login_required
+@require_role(Role.ADMIN)
 def costs(request):
     """LLM 用量與成本。
 
