@@ -83,7 +83,7 @@ class TestWebInterface:
     """
 
     @pytest.mark.parametrize("path", [
-        "/", "/review/", "/documents/", "/pipeline/", "/costs/",
+        "/", "/review/", "/documents/", "/pipeline/", "/crawlers/", "/costs/",
     ])
     def test_主要頁面可載入(self, admin_client, path):
         assert admin_client.get(path).status_code == 200

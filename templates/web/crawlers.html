@@ -1,0 +1,67 @@
+{% extends "web/base.html" %}
+{% block title %}爬蟲{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>爬蟲</h1>
+  <span class="sub">排程設定與手動觸發——健康度與覆蓋率見「管線狀態」</span>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th>來源</th><th>型別</th>
+      <th>排程設定</th>
+      <th>狀態</th><th class="num">下次到期</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td class="tight"><b>{{ row.source.name }}</b><br><span style="color:var(--text-3)">{{ row.source.slug }}</span></td>
+        <td class="tight">{{ row.source.get_type_display }}</td>
+        <td class="tight">
+          <form method="post" action="{% url 'web:crawler_update' row.source.slug %}" class="chips" style="align-items:center;gap:4px">
+            {% csrf_token %}
+            <input type="number" name="poll_interval_minutes" value="{{ row.source.poll_interval_minutes }}"
+                   min="1" style="width:60px" class="mono" title="爬取間隔（分鐘）">
+            <span style="color:var(--text-3)">分</span>
+            <span style="color:var(--text-3);margin:0 2px">｜可用時段</span>
+            <input type="number" name="service_window_start_hour" placeholder="起"
+                   value="{{ row.source.service_window_start_hour|default_if_none:'' }}"
+                   min="0" max="23" style="width:44px" class="mono" title="可用時段起始（0–23 時，留空表示不限）">
+            <span style="color:var(--text-3)">–</span>
+            <input type="number" name="service_window_end_hour" placeholder="迄"
+                   value="{{ row.source.service_window_end_hour|default_if_none:'' }}"
+                   min="0" max="23" style="width:44px" class="mono" title="可用時段結束（0–23 時）">
+            <label style="margin-left:6px;font-size:11px;color:var(--text-3);white-space:nowrap">
+              <input type="checkbox" name="enabled" {% if row.source.enabled %}checked{% endif %}> 啟用
+            </label>
+            <button class="btn" style="padding:2px 8px">儲存</button>
+          </form>
+        </td>
+        <td class="tight">
+          {% if row.unhealthy %}<span class="tag danger">連續失敗 {{ row.source.consecutive_failures }}</span>
+          {% elif row.source.consecutive_failures %}<span class="tag warn">失敗 {{ row.source.consecutive_failures }}</span>
+          {% elif not row.source.last_success_at %}<span class="tag muted">從未成功</span>
+          {% else %}<span class="tag ok">正常</span>{% endif %}
+        </td>
+        <td class="num tight">
+          {% if not row.source.enabled %}—
+          {% elif row.due_now %}<span class="tag accent">現在</span>
+          {% else %}{{ row.effective_interval }} 分內{% endif %}
+        </td>
+        <td class="tight">
+          <form method="post" action="{% url 'web:crawler_run' row.source.slug %}">
+            {% csrf_token %}
+            <button class="btn primary" style="padding:2px 10px">立即爬取</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="empty">尚無註冊的來源</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

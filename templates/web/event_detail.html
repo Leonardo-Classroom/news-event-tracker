@@ -45,7 +45,7 @@
                 <a href="{% url 'web:document_detail' item.doc.pk %}">{{ item.doc.title }}</a>
               </div>
               <div class="tl-meta">
-                {{ item.doc.source.slug }}
+                {{ item.doc.source.name }}
                 {% if item.doc.content_class == 'public_record' %}· <span style="color:var(--accent)">官方紀錄</span>{% endif %}
                 {% if item.link.method != 'import' %}· {{ item.link.get_method_display }}{% endif %}
                 {% if item.doc.case_numbers %}· <span class="mono">{{ item.doc.case_numbers|join:"、" }}</span>{% endif %}

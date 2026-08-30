@@ -27,6 +27,7 @@
           文件<span class="count">{{ nav_counts.documents }}</span></a>
         <a href="{% url 'web:pipeline' %}" class="{% if nav == 'pipeline' %}active{% endif %}">
           管線狀態{% if nav_counts.unhealthy %}<span class="count" style="color:var(--danger)">{{ nav_counts.unhealthy }}</span>{% endif %}</a>
+        <a href="{% url 'web:crawlers' %}" class="{% if nav == 'crawlers' %}active{% endif %}">爬蟲</a>
       </div>
       <div class="nav-group">
         <h6>系統</h6>
@@ -37,6 +38,13 @@
     </div>
   </nav>
   <main class="main">
+    {% if messages %}
+      <div class="chips" style="margin-bottom:14px">
+        {% for message in messages %}
+          <span class="tag {% if message.tags == 'error' %}danger{% else %}ok{% endif %}">{{ message }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

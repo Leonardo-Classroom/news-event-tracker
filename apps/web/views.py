@@ -11,23 +11,27 @@
     /review/     待審核的事件（Scope 6 的入口）
     /documents/  文件檢索
     /pipeline/   管線狀態與來源健康度
+    /crawlers/   爬蟲排程與手動觸發
     /costs/      LLM 用量與成本
 """
 from __future__ import annotations
 
 import datetime as dt
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Q, Sum
-from django.shortcuts import get_object_or_404, render
+from django.db.models import Count, F, Max, Min, Q, Sum
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.events.models import (
     DORMANT_AFTER_DAYS, Event, EventDocument, EventStatus,
 )
 from apps.ingest.models import Document, Source
-from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes
+from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, should_poll
+from apps.ingest.tasks import dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
 from apps.llm.models import LlmPurpose, LlmUsage
 
@@ -71,10 +75,12 @@ def event_detail(request, slug):
     就是填補那段空白。把空白畫出來，才能看出填補了沒有。
     """
     event = get_object_or_404(Event, slug=slug)
+    # nulls_last=True：理由同 documents 視圖——DESC 排序若不指定，
+    # 缺日期的文件會被排到時間線最前面，看起來像是「最新進展」。
     links = (EventDocument.objects
              .filter(event=event)
              .select_related("document", "document__source")
-             .order_by("-document__published_at"))
+             .order_by(F("document__published_at").desc(nulls_last=True)))
 
     # 由新到舊排列，並在相鄰節點間插入空白期標記
     items = []
@@ -126,9 +132,12 @@ def documents(request):
     source = request.GET.get("source", "")
     only = request.GET.get("only", "")
 
+    # nulls_last=True：PostgreSQL 對 DESC 排序預設把 NULL 排在最前面，
+    # 若不指定，僅 0.2% 缺日期的文件會佔滿列表最前面幾頁，
+    # 讓「大部分文件沒有日期」看起來像是普遍問題而非罕見的資料缺陷。
     queryset = (Document.objects.select_related("source")
                 .defer("raw_body", "embedding", "search_text")
-                .order_by("-published_at"))
+                .order_by(F("published_at").desc(nulls_last=True)))
     if query:
         from apps.retrieval.keyword import BigramFtsBackend
         queryset = BigramFtsBackend().search(queryset, query)
@@ -145,7 +154,7 @@ def documents(request):
     return render(request, "web/documents.html", {
         "nav": "documents", "page": page, "q": query,
         "source": source, "only": only,
-        "sources": Source.objects.order_by("slug").values_list("slug", flat=True),
+        "sources": Source.objects.order_by("name").values("slug", "name"),
     })
 
 
@@ -199,6 +208,83 @@ def pipeline(request):
         "body_pct": with_body / total * 100 if total else 0,
         "vector_pct": vectorised / relevant * 100 if relevant else 0,
     })
+
+
+@login_required
+def crawlers(request):
+    """爬蟲排程設定與手動觸發。
+
+    與 ``pipeline`` 的分工：pipeline 是**觀察**（健康度、覆蓋率），
+    這裡是**操作**（改排程、立即跑一次）。兩者都需要時硬湊在同一頁
+    會讓「看數字」與「按按鈕」互相干擾，拆開比較不會誤觸。
+    """
+    now = timezone.now()
+    rows = []
+    for source in Source.objects.order_by("-enabled", "name"):
+        rows.append({
+            "source": source,
+            "effective_interval": effective_interval_minutes(source),
+            "due_now": should_poll(source) if source.enabled else False,
+            "unhealthy": source.consecutive_failures >= FAILURE_THRESHOLD,
+        })
+    return render(request, "web/crawlers.html", {"nav": "crawlers", "rows": rows, "now": now})
+
+
+@login_required
+@require_POST
+def crawler_run(request, slug):
+    """手動觸發單一來源立即爬取一次。
+
+    非同步派工（Celery），不同步等待完成——單次爬取（尤其
+    Playwright 站台）可達數分鐘，同步等待會讓請求逾時，且使用者
+    看不出頁面是卡住還是真的在跑。派工後導回列表頁，結果稍後在
+    「最後成功時間」「連續失敗次數」自然反映出來。
+    """
+    source = get_object_or_404(Source, slug=slug)
+    dispatch_poll(source)
+    messages.success(request, f"已派發「{source.name}」的爬取任務，稍後重新整理查看結果")
+    return redirect("web:crawlers")
+
+
+@login_required
+@require_POST
+def crawler_update(request, slug):
+    """更新單一來源的排程參數：多久爬一次、可用時段。"""
+    source = get_object_or_404(Source, slug=slug)
+
+    try:
+        interval = int(request.POST.get("poll_interval_minutes", ""))
+        if interval < 1:
+            raise ValueError
+    except ValueError:
+        messages.error(request, "爬取間隔須為正整數（分鐘）")
+        return redirect("web:crawlers")
+
+    source.poll_interval_minutes = interval
+    source.enabled = request.POST.get("enabled") == "on"
+
+    start = request.POST.get("service_window_start_hour", "").strip()
+    end = request.POST.get("service_window_end_hour", "").strip()
+    if start and end:
+        try:
+            start_hour, end_hour = int(start), int(end)
+            if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
+                raise ValueError
+        except ValueError:
+            messages.error(request, "可用時段須為 0–23 的整數小時")
+            return redirect("web:crawlers")
+        source.service_window_start_hour = start_hour
+        source.service_window_end_hour = end_hour
+    else:
+        source.service_window_start_hour = None
+        source.service_window_end_hour = None
+
+    source.save(update_fields=[
+        "poll_interval_minutes", "enabled",
+        "service_window_start_hour", "service_window_end_hour", "updated_at",
+    ])
+    messages.success(request, f"已更新「{source.name}」的排程設定")
+    return redirect("web:crawlers")
 
 
 @login_required

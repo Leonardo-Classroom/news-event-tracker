@@ -10,7 +10,7 @@
   <input type="search" name="q" value="{{ q }}" placeholder="搜尋標題與內文（走 bigram 全文索引）" style="flex:1;min-width:240px">
   <select name="source">
     <option value="">全部來源</option>
-    {% for s in sources %}<option value="{{ s }}" {% if source == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    {% for s in sources %}<option value="{{ s.slug }}" {% if source == s.slug %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
   </select>
   <select name="only">
     <option value="">全部</option>
@@ -29,7 +29,7 @@
   {% for doc in page %}
     <tr>
       <td class="num tight">{{ doc.published_at|date:"Y-m-d"|default:"—" }}</td>
-      <td class="tight">{{ doc.source.slug }}</td>
+      <td class="tight">{{ doc.source.name }}</td>
       <td><a href="{% url 'web:document_detail' doc.pk %}">{{ doc.title }}</a></td>
       <td class="tight">
         {% if doc.relevant %}<span class="tag ok">相關</span>{% endif %}

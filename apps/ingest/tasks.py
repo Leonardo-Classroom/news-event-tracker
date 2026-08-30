@@ -68,6 +68,20 @@ def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
     }
 
 
+def dispatch_poll(source: Source):
+    """依來源型別派往對應佇列。
+
+    抽成獨立函式而非寫在 ``poll_due_sources`` 裡，是因為手動觸發的
+    「立即爬取」按鈕（web UI）需要**完全相同的路由邏輯**——
+    Playwright 任務的記憶體與時間特性與輕量 HTTP 差異極大，混在
+    同一佇列會互相拖累（ADR-0007）。若各寫一份，兩處遲早會分岔
+    （例如新增一種來源型別時只改到其中一處）。
+    """
+    if source.type == SourceType.NEWS_SCRAPE:
+        return browser_poll_source.delay(source.pk)
+    return poll_source.delay(source.pk)
+
+
 @shared_task(
     name="apps.ingest.tasks.poll_due_sources",
     queue="fetch",
@@ -83,12 +97,7 @@ def poll_due_sources() -> dict:
     for source in Source.objects.filter(enabled=True):
         if not should_poll(source):
             continue
-        # 依來源型別派往對應佇列：Playwright 任務的記憶體與時間特性
-        # 與輕量 HTTP 差異極大，混在同一佇列會互相拖累（ADR-0007）。
-        if source.type == SourceType.NEWS_SCRAPE:
-            browser_poll_source.delay(source.pk)
-        else:
-            poll_source.delay(source.pk)
+        dispatch_poll(source)
         dispatched.append(source.slug)
     logger.info("派發 %d 個到期來源：%s", len(dispatched), ", ".join(dispatched) or "無")
     return {"dispatched": dispatched}
