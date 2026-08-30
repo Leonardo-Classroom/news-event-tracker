@@ -191,9 +191,8 @@ class HybridRetriever:
             for name, terms in self._keyword_channels(query):
                 rankings[name] = self.by_keyword(base, terms)
         if "vector" in channels:
-            # 向量通道用完整查詢：語意編碼本來就在處理整段文字，
-            # 拆開反而失去「這些人與這件事一起出現」的語境
-            rankings["vector"] = self.by_vector(base, str(query))
+            for name, text in self._vector_channels(query):
+                rankings[name] = self.by_vector(base, text)
 
         results = fuse(rankings)
         pinned_set = set(pinned_ids)
@@ -222,4 +221,32 @@ class HybridRetriever:
         support = " ".join(query.support)
         if support:
             channels.append(("support", support))
+        return channels
+
+    @staticmethod
+    def _vector_channels(query) -> list[tuple[str, str]]:
+        """向量通道的查詢文字。自由文字只有一個通道。
+
+        ``EventQuery`` 一開始的設計假設是「向量通道用完整查詢，
+        語意編碼本來就在處理整段文字，拆開反而失去語境」——這個假設
+        是錯的，任務 19 用向量全量完成後才測出來：京華城案（9 名
+        被告）用完整查詢（身分詞＋9 個人名）召回 **0/30**，改用僅
+        身分詞「京華城容積」召回 **9/30**。原因是向量編碼的是整段
+        文字的語意重心，九個人名的份量遠超過一個地名，語意重心被
+        拉向「這些人的司法程序」，偏離了同一事件裡「容積獎勵撤銷」
+        這類行政面的報導——兩者主題不同但屬於同一事件。
+
+        但改成只用身分詞並非全面更好：新竹棒球場案（3 名關係人）
+        完整查詢 18/20 優於僅身分詞的 14/20——人名少時，完整查詢的
+        額外語境有幫助。兩種案例的最佳選擇相反，因此**兩者都做，
+        用 RRF 融合**——融合後兩個事件都不劣於各自單獨的最佳結果
+        （新竹棒球場 19/20、京華城 9/30，均達到兩者中較高者）。
+        """
+        identity = getattr(query, "identity", None)
+        if identity is None:
+            return [("vector", str(query))]
+        channels = [("vector_identity", identity)] if identity else []
+        full = str(query)
+        if full and full != identity:
+            channels.append(("vector_full", full))
         return channels

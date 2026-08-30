@@ -149,6 +149,37 @@ class TestChannels:
         assert docs["案號"].pk in [c.document_id for c in found]
 
 
+class TestVectorChannels:
+    """向量通道的查詢拆分。純邏輯，不需要真實 embedding 模型。
+
+    任務 19 向量全量完成後才測出：完整查詢（身分詞＋多個人名）在
+    京華城案（9 名被告）召回 0/30，改用僅身分詞召回 9/30——人名數量
+    拉走了語意重心。但新竹棒球場案（3 名關係人）完整查詢反而更好
+    （18/20 對 14/20）。兩種案例最佳選擇相反，因此改為兩者都做、
+    RRF 融合。"""
+
+    def test_自由文字只有一個通道(self):
+        channels = HybridRetriever._vector_channels("柯文哲 京華城")
+        assert channels == [("vector", "柯文哲 京華城")]
+
+    def test_EventQuery拆成身分詞與完整查詢兩個通道(self):
+        from apps.events.terms import EventQuery
+
+        query = EventQuery(identity="京華城容積", support=("柯文哲", "沈慶京"))
+        channels = dict(HybridRetriever._vector_channels(query))
+        assert channels["vector_identity"] == "京華城容積"
+        assert channels["vector_full"] == "京華城容積 柯文哲 沈慶京"
+
+    def test_無涉案人時不重複同一個查詢(self):
+        """身分詞與完整查詢相同時只留一個通道，避免同一份向量搜尋
+        結果被算兩次而在 RRF 融合裡取得不成比例的權重。"""
+        from apps.events.terms import EventQuery
+
+        query = EventQuery(identity="南方澳大橋斷橋", support=())
+        channels = HybridRetriever._vector_channels(query)
+        assert channels == [("vector_identity", "南方澳大橋斷橋")]
+
+
 def _all():
     from apps.ingest.models import Document
 
