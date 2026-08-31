@@ -34,7 +34,10 @@ from apps.core.dates import parse_datetime
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ExtractedArticle", "extract_article", "BODY_SELECTORS", "NEEDS_BROWSER"]
+__all__ = [
+    "ExtractedArticle", "extract_article", "extract_published_at",
+    "BODY_SELECTORS", "NEEDS_BROWSER",
+]
 
 #: 站台專屬的內文選擇器。UDN 與中時沿用 crawler/sites.py 的實證值。
 BODY_SELECTORS: dict[str, str] = {
@@ -108,6 +111,35 @@ def _from_json_ld(tree: HTMLParser) -> tuple[str, str, str]:
     return body, date, author
 
 
+def _date_from_meta(tree: HTMLParser) -> str:
+    for sel in (
+        "meta[property='article:published_time']",
+        "meta[name='pubdate']",
+        "meta[itemprop='datePublished']",
+    ):
+        node = tree.css_first(sel)
+        if node:
+            value = (node.attributes.get("content") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def extract_published_at(html: str):
+    """只抽發布時間，不要求內文長度。
+
+    清單頁入庫的中時／聯合新聞常常有標題與內文、卻沒有時間——
+    JSON-LD 解析失敗時仍可能有 ``article:published_time``。
+    """
+    if not html or not html.strip():
+        return None
+    tree = HTMLParser(html)
+    _, date_text, _ = _from_json_ld(tree)
+    if not date_text:
+        date_text = _date_from_meta(tree)
+    return parse_datetime(date_text) if date_text else None
+
+
 def _clean_body(raw: str) -> str:
     """去除圖說、空行與過度空白。
 
@@ -138,6 +170,8 @@ def extract_article(html: str, *, source_slug: str = "") -> ExtractedArticle:
 
     body, date_text, author = _from_json_ld(tree)
     strategy = "json-ld"
+    if not date_text:
+        date_text = _date_from_meta(tree)
 
     if len(body) < _MIN_BODY_LENGTH:
         selector = BODY_SELECTORS.get(source_slug)

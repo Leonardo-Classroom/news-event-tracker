@@ -254,6 +254,58 @@ def fetch_document_body(
     return True
 
 
+def fill_missing_published_at(
+    *,
+    limit: int = 0,
+    source_slug: str = "",
+    fetcher: Fetcher | None = None,
+) -> BodyFetchResult:
+    """回填缺 ``published_at`` 的文件。清單頁入庫只有標題，時間在內頁。
+
+    已有內文者 ``fill_missing_bodies`` 會直接跳過，所以缺日期的列
+    不會被那條路徑補上。這裡只抓時間，不重寫內文。
+    """
+    from apps.ingest.article import NEEDS_BROWSER, extract_published_at
+
+    result = BodyFetchResult()
+    queryset = (Document.objects.filter(published_at__isnull=True)
+                .select_related("source")
+                .only("id", "url", "published_at", "source__slug")
+                .order_by("-fetched_at"))
+    if source_slug:
+        queryset = queryset.filter(source__slug=source_slug)
+    if limit:
+        queryset = queryset[:limit]
+
+    owns_fetcher = fetcher is None
+    fetcher = fetcher or HttpFetcher()
+    try:
+        for document in queryset.iterator():
+            if document.source.slug in NEEDS_BROWSER:
+                result.failed += 1
+                continue
+            result.attempted += 1
+            try:
+                response = fetcher.get(document.url)
+                if not response.ok:
+                    raise FetchError(f"HTTP {response.status_code}")
+                published = extract_published_at(response.text)
+                if published is None:
+                    raise ValueError("內頁沒有可解析的發布時間")
+            except (FetchError, ValueError) as exc:
+                result.failed += 1
+                result.errors.append(f"{document.url}: {exc}")
+                logger.warning("補日期失敗 %s：%s", document.url, exc)
+                continue
+            document.published_at = published
+            document.save(update_fields=["published_at"])
+            result.filled += 1
+    finally:
+        if owns_fetcher and hasattr(fetcher, "close"):
+            fetcher.close()
+    return result
+
+
 def fill_missing_bodies(
     *,
     limit: int = 50,

@@ -15,6 +15,7 @@ from apps.ingest.services import (
     FAILURE_THRESHOLD,
     IN_PROGRESS_STALE,
     effective_interval_minutes,
+    fill_missing_published_at,
     ingest_source,
     poll_in_progress,
     should_poll,
@@ -186,3 +187,28 @@ class TestIngestSource:
                                clock=FixedClock(dt.datetime(2026, 3, 5, tzinfo=UTC)))
         assert result.ok
         assert fetcher.calls == [source.feed_url]
+
+
+@pytest.mark.medium
+class TestFillMissingPublishedAt:
+    def test_從內頁meta補上日期(self, source):
+        from apps.ingest.models import ContentClass, Document
+
+        doc = Document.objects.create(
+            source=source, url="https://example.test/no-date",
+            title="缺日期", raw_body="已有內文" * 20,
+            content_class=ContentClass.COPYRIGHTED,
+        )
+        html = (
+            "<html><head>"
+            '<meta property="article:published_time" '
+            'content="2026-08-31T08:35:27+08:00">'
+            "</head></html>"
+        )
+        result = fill_missing_published_at(
+            fetcher=FakeFetcher({doc.url: html}))
+        doc.refresh_from_db()
+        assert result.filled == 1
+        assert result.failed == 0
+        assert doc.published_at == dt.datetime(
+            2026, 8, 31, 0, 35, 27, tzinfo=dt.timezone.utc)
