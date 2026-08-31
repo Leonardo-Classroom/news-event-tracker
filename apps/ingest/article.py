@@ -40,6 +40,7 @@ __all__ = ["ExtractedArticle", "extract_article", "BODY_SELECTORS", "NEEDS_BROWS
 BODY_SELECTORS: dict[str, str] = {
     "udn": "section.article-content__editor",
     "chinatimes": "div.article-body",
+    "ctee": "article",
     "ettoday": "div.story",
     # 以下有 JSON-LD，選擇器僅作備援
     "cna-society": "div.paragraph",

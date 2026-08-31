@@ -4,11 +4,14 @@
 改為註冊制後，新增來源只需實作 adapter 並註冊，不必碰執行框架。
 """
 from .base import Adapter, ParsedDocument, get_adapter, register_adapter
-from .html_list import ChinaTimesListAdapter, HtmlListAdapter, ListConfig, UdnListAdapter
+from .html_list import (
+    ChinaTimesListAdapter, CteeListAdapter, HtmlListAdapter, ListConfig,
+    UdnListAdapter,
+)
 from .rss import RssAdapter
 
 __all__ = [
     "Adapter", "ParsedDocument", "get_adapter", "register_adapter",
     "RssAdapter", "HtmlListAdapter", "ListConfig",
-    "UdnListAdapter", "ChinaTimesListAdapter",
+    "UdnListAdapter", "ChinaTimesListAdapter", "CteeListAdapter",
 ]

@@ -39,6 +39,19 @@ class TestDispatchPoll:
         mocked_browser.delay.assert_called_once_with(source.pk)
         mocked_poll.delay.assert_not_called()
 
+    def test_工商時報走fetch佇列(self, db):
+        """/livenews 首頁被 Cloudflare 擋，分類頁可純 HTTP，不必佔 browser 佇列。"""
+        source = Source.objects.create(
+            slug="ctee", name="工商時報", type=SourceType.NEWS_SCRAPE,
+            base_url="https://www.ctee.com.tw",
+            feed_url="https://www.ctee.com.tw/livenews/ctee",
+        )
+        with patch("apps.ingest.tasks.poll_source") as mocked_poll, \
+             patch("apps.ingest.tasks.browser_poll_source") as mocked_browser:
+            dispatch_poll(source)
+        mocked_poll.delay.assert_called_once_with(source.pk, adapter_slug="ctee")
+        mocked_browser.delay.assert_not_called()
+
     def test_司法院api型別走fetch佇列(self, official_source):
         with patch("apps.ingest.tasks.poll_source") as mocked_poll:
             dispatch_poll(official_source)

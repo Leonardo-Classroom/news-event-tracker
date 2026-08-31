@@ -76,9 +76,16 @@ def dispatch_poll(source: Source):
     Playwright 任務的記憶體與時間特性與輕量 HTTP 差異極大，混在
     同一佇列會互相拖累（ADR-0007）。若各寫一份，兩處遲早會分岔
     （例如新增一種來源型別時只改到其中一處）。
+
+    工商時報（ctee）雖然也是 NEWS_SCRAPE（無 RSS），但清單頁
+    ``/livenews/ctee`` 實測純 HTTP 可過 Cloudflare，不必佔用
+    browser 佇列。未列入 BROWSER_SOURCES 的 scrape 來源改走
+    fetch + 以 slug 註冊的 adapter。
     """
-    if source.type == SourceType.NEWS_SCRAPE:
+    if source.slug in BROWSER_SOURCES:
         return browser_poll_source.delay(source.pk)
+    if source.type == SourceType.NEWS_SCRAPE:
+        return poll_source.delay(source.pk, adapter_slug=source.slug)
     return poll_source.delay(source.pk)
 
 

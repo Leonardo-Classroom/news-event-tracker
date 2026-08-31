@@ -44,6 +44,13 @@ SCRAPE_SOURCES = [
     ("chinatimes", "中時新聞網", "https://www.chinatimes.com", 30),
 ]
 
+# 無 RSS，但清單頁可純 HTTP（/livenews 首頁被 Cloudflare 擋，
+# 分類頁 /livenews/ctee 實測 200）。走 fetch 佇列。
+HTTP_LIST_SOURCES = [
+    ("ctee", "工商時報", "https://www.ctee.com.tw",
+     "https://www.ctee.com.tw/livenews/ctee", 60),
+]
+
 
 class Command(BaseCommand):
     help = "建立或更新初始採集來源（冪等）"
@@ -89,6 +96,23 @@ class Command(BaseCommand):
             updated_total += not created
             state = "啟用" if options["enable_scrape"] else "停用（待 Playwright adapter）"
             self.stdout.write(f"  {'＋' if created else '　'} {slug:<14} {name}　{state}")
+
+        for slug, name, base_url, feed_url, interval in HTTP_LIST_SOURCES:
+            _, created = Source.objects.update_or_create(
+                slug=slug,
+                defaults={
+                    "name": name,
+                    "type": SourceType.NEWS_SCRAPE,
+                    "base_url": base_url,
+                    "feed_url": feed_url,
+                    "content_class": ContentClass.COPYRIGHTED,
+                    "poll_interval_minutes": interval,
+                    "enabled": True,
+                },
+            )
+            created_total += created
+            updated_total += not created
+            self.stdout.write(f"  {'＋' if created else '　'} {slug:<14} {name}　啟用（HTTP 清單）")
 
         self.stdout.write(self.style.SUCCESS(
             f"\n完成：新增 {created_total}、更新 {updated_total}，"

@@ -68,6 +68,29 @@ class TestChinaTimesAdapter:
             assert re.search(r"/(realtimenews|newspapers|opinion)/\d{14}-\d+", d.url)
 
 
+class TestCteeAdapter:
+    def setup_method(self):
+        self.adapter = get_adapter("ctee")
+        self.html = load("ctee_livenews")
+
+    def test_解析出文章(self):
+        docs = self.adapter.list_documents(
+            self.html, base_url="https://www.ctee.com.tw")
+        assert len(docs) == 3
+
+    def test_url_符合工商時報文章樣式且已正規化(self):
+        docs = self.adapter.list_documents(
+            self.html, base_url="https://www.ctee.com.tw")
+        for d in docs:
+            assert re.search(r"https://www\.ctee\.com\.tw/news/\d+-\d+$", d.url)
+
+    def test_圖片連結不覆蓋已有標題(self):
+        docs = self.adapter.list_documents(
+            self.html, base_url="https://www.ctee.com.tw")
+        by_url = {d.url: d.title for d in docs}
+        assert "沙德爾" in by_url["https://www.ctee.com.tw/news/20260831700477-431401"]
+
+
 class TestFailureModes:
     """靜默回傳空清單會讓來源健康度監測失效——與 RSS adapter 同一原則。"""
 

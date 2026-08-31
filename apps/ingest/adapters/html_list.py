@@ -104,6 +104,14 @@ CHINATIMES_CONFIG = ListConfig(
     label="中時新聞網",
 )
 
+# 工商時報：/livenews 首頁被 Cloudflare 擋，分類頁 /livenews/ctee
+# 實測純 HTTP 200。文章 URL 形如 /news/20260831700477-431401。
+CTEE_CONFIG = ListConfig(
+    href_pattern=re.compile(r"/news/\d+-\d+"),
+    link_selector="h3.news-title a",
+    label="工商時報",
+)
+
 
 @register_adapter("udn")
 class UdnListAdapter(HtmlListAdapter):
@@ -115,3 +123,9 @@ class UdnListAdapter(HtmlListAdapter):
 class ChinaTimesListAdapter(HtmlListAdapter):
     def __init__(self):
         super().__init__(CHINATIMES_CONFIG)
+
+
+@register_adapter("ctee")
+class CteeListAdapter(HtmlListAdapter):
+    def __init__(self):
+        super().__init__(CTEE_CONFIG)
