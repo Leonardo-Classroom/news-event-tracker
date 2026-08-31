@@ -64,7 +64,7 @@ def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
     source = Source.objects.get(pk=source_id)
     if source.type == SourceType.JUDICIAL_API:
         from apps.events.tasks import run_official_check
-        return run_official_check()
+        return run_official_check(force=True)
     result = ingest_source(source, adapter_slug=adapter_slug)
     logger.info(
         "來源 %s：取得 %d、新增 %d、更新 %d、略過 %d%s",
@@ -107,7 +107,7 @@ def dispatch_poll(source: Source):
         return poll_source.delay(source.pk)
     if source.type == SourceType.JUDICIAL_API:
         from apps.events.tasks import check_official_records
-        return check_official_records.delay()
+        return check_official_records.delay(force=True)
     raise ValueError(f"來源型別 {source.type} 尚無輪詢路徑")
 
 

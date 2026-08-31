@@ -63,8 +63,14 @@ class OfficialCheckSummary:
     session_expired: bool = False
 
 
-def check_due_events(*, months_back: int = 2, dry_run: bool = False) -> OfficialCheckSummary:
-    """對所有到期的追蹤中事件，依已知案號查最近幾個月的封存檔。
+def check_due_events(*, months_back: int = 2, dry_run: bool = False,
+                     force: bool = False) -> OfficialCheckSummary:
+    """對追蹤中事件依已知案號查最近幾個月的封存檔。
+
+    ``force=True`` 給「立即爬取」用：略過到期判斷。排程必須尊重
+    每日一次的間隔，否則點一次按鈕之後 Beat 再跑會空轉，而手動
+    觸發若也走到期判斷，剛查過的事件會被跳過、下載 0 份封存檔，
+    卻把來源標成成功。
 
     Returns:
         ``OfficialCheckSummary``。``session_expired`` 為 True 時，
@@ -76,7 +82,7 @@ def check_due_events(*, months_back: int = 2, dry_run: bool = False) -> Official
     due_events = [
         e for e in Event.objects.filter(
             status__in=[EventStatus.ACTIVE, EventStatus.DORMANT, EventStatus.CLOSED])
-        if e.case_numbers and e.due_for_official_check()
+        if e.case_numbers and (force or e.due_for_official_check())
     ]
     if not due_events:
         return summary

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 JUDICIAL_SEARCH_SLUG = "judicial-search"
 
 
-def run_official_check() -> dict:
+def run_official_check(*, force: bool = False) -> dict:
     """執行官方源檢查，並把結果寫回爬蟲頁上的司法來源列。
 
     不寫的話，點「立即爬取」之後 ``last_success_at`` 永遠是空的，
@@ -24,7 +24,7 @@ def run_official_check() -> dict:
     source = Source.objects.filter(slug=JUDICIAL_SEARCH_SLUG).first()
     if source is not None:
         mark_poll_started(source)
-    summary = check_due_events()
+    summary = check_due_events(force=force)
     now = timezone.now()
     if source is not None:
         if summary.session_expired:
@@ -55,7 +55,7 @@ def run_official_check() -> dict:
     soft_time_limit=600,
     time_limit=720,
 )
-def check_official_records() -> dict:
+def check_official_records(force: bool = False) -> dict:
     """派發官方源檢查。走 fetch 佇列——這是輕量 HTTP 下載（雖然單檔
     可達 200MB+，但不是 Playwright），與 browser 佇列的資源特性不同
     （ADR-0007）。
@@ -63,4 +63,4 @@ def check_official_records() -> dict:
     逾時設得比一般 fetch 任務寬鬆：下載月封存檔本身可能需要數十秒到
     數分鐘（實測 270MB 在正常頻寬下約 1-2 分鐘），加上可能查兩個月份。
     """
-    return run_official_check()
+    return run_official_check(force=force)

@@ -75,7 +75,9 @@
           {% elif row.unhealthy %}<span class="tag danger">連續失敗 {{ row.source.consecutive_failures }}</span>
           {% elif row.source.consecutive_failures %}<span class="tag warn">失敗 {{ row.source.consecutive_failures }}</span>
           {% elif not row.source.last_success_at %}<span class="tag muted">從未成功</span>
-          {% else %}<span class="tag ok">正常</span>{% endif %}
+          {% else %}<span class="tag ok">正常</span>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px">上次成功 {{ row.source.last_success_at|date:"m-d H:i" }}</div>
+          {% endif %}
           {% if row.source.last_error and not row.in_progress %}
             <div style="font-size:11px;color:var(--text-3);margin-top:2px;max-width:280px;white-space:normal">{{ row.source.last_error }}</div>
           {% endif %}

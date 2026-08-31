@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from django.utils import timezone
+
 from apps.events.models import Event, EventStatus
 from apps.events.official_check import check_due_events
 from apps.events.tasks import run_official_check
@@ -53,6 +55,25 @@ class TestCheckDueEvents:
             summary = check_due_events()
         mocked.assert_not_called()
         assert summary.events_checked == 0
+
+    def test_手動force會檢查尚未到期的有案號事件(self, logged_in_session, db):
+        """立即爬取不能走排程的到期判斷，否則剛查過的事件會被跳過。"""
+        Event.objects.create(
+            slug="just-checked", title="剛查過", status=EventStatus.ACTIVE,
+            case_numbers=["113年度金訴字第51號"],
+            last_official_check_at=timezone.now(),
+        )
+        with patch("apps.events.official_check.list_monthly_archives",
+                   return_value=[ARCHIVE]) as mocked_list, \
+             patch("apps.events.official_check.download_archive",
+                   return_value=b"fake"), \
+             patch("apps.events.official_check.find_case_in_archive",
+                   return_value=None):
+            skipped = check_due_events()
+            forced = check_due_events(force=True)
+        mocked_list.assert_called_once()  # 非 force 因無到期事件不該查
+        assert skipped.events_checked == 0
+        assert forced.events_checked == 1
 
     def test_無事件案號的事件不列入待查(self, logged_in_session, db):
         Event.objects.create(slug="no-case", title="無案號事件",
@@ -177,8 +198,9 @@ class TestRunOfficialCheck:
             session_expired=False, events_checked=0,
             archives_downloaded=0, results=[],
         )
-        with patch("apps.events.official_check.check_due_events", return_value=summary):
-            run_official_check()
+        with patch("apps.events.official_check.check_due_events", return_value=summary) as mocked:
+            run_official_check(force=True)
+        mocked.assert_called_once_with(force=True)
         source.refresh_from_db()
         assert source.last_success_at is not None
         assert source.consecutive_failures == 0
