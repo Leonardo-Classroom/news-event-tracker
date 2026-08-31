@@ -134,7 +134,19 @@ class TestCrawlersView:
         source.refresh_from_db()
         assert source.historical_status == "running"
         html = admin_client.get("/crawlers/").content.decode()
+        assert "已派工" in html
+
+    def test_有進度cursor時顯示回補中(self, admin_client, db):
+        Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+            historical_status="running",
+            historical_cursor='{"date":"2016-07-15","page":1,"offset":0}',
+            historical_updated_at=dt.datetime.now(UTC),
+        )
+        html = admin_client.get("/crawlers/").content.decode()
         assert "回補中" in html
+        assert "2016-07-15" in html
 
     def test_歷史回補要求POST(self, admin_client, crawl_source):
         with patch("apps.web.views.dispatch_historical") as mocked:

@@ -8,12 +8,33 @@ from apps.core.clock import FixedClock
 from apps.ingest.archives import TAIPEI
 from apps.ingest.fetchers import FakeFetcher
 from apps.ingest.historical import (
-    STATUS_DONE, STATUS_ERROR, STATUS_RUNNING, ingest_archive_chunk,
-    mark_historical_started,
+    STATUS_DONE, STATUS_ERROR, STATUS_RUNNING, historical_in_progress,
+    ingest_archive_chunk, mark_historical_started,
 )
 from apps.ingest.models import Document, Source, SourceType
 
 UTC = dt.timezone.utc
+
+
+class TestHistoricalInProgress:
+    def test_有cursor且心跳新鮮視為進行中(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = Source(
+            historical_status=STATUS_RUNNING,
+            historical_cursor='{"date":"2016-07-02"}',
+            historical_updated_at=now - dt.timedelta(minutes=2),
+        )
+        assert historical_in_progress(src, now) is True
+
+    def test_派工後三分鐘仍無cursor視為worker沒接手(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = Source(
+            historical_status=STATUS_RUNNING,
+            historical_cursor="",
+            historical_started_at=now - dt.timedelta(minutes=5),
+            historical_updated_at=now - dt.timedelta(minutes=5),
+        )
+        assert historical_in_progress(src, now) is False
 
 UDN_DAY = """
 <div class="story-list__text">

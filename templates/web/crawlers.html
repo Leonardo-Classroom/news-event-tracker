@@ -118,9 +118,10 @@
   <div class="body">
     <p style="color:var(--text-2);margin:8px 0 12px">
       即時輪詢只抓當天清單或 RSS 近況。這裡改走各站歷史日檔／分頁／API，
-      從站台還能翻到的最早日期掃到今天。寫入是 upsert，可重複觸發。
-      回補不計入來源健康度，失敗不會讓「立即爬取」被記成連續失敗。
-      RSS 來源的清單 API 往往只有近幾天，日期以實測為準。
+      從站台還能翻到的最早日期掃到今天。每個媒體一條獨立任務，fetch 佇列
+      最多 8 條同時跑，邊抓邊寫入資料庫。寫入是 upsert，可重複觸發。
+      回補不計入來源健康度。Celery worker 不會隨程式碼自動重載，
+      新增任務後若顯示「已派工」但篇數不動，需要重啟 worker。
     </p>
     <form method="post" action="{% url 'web:crawler_history_all' %}" style="margin-bottom:12px"
           onsubmit="return confirm('將派發所有新聞來源的歷史回補，可能跑數小時到數天。確定？')">
@@ -142,8 +143,10 @@
             {% if row.spec %}<div style="font-size:11px;color:var(--text-3);max-width:360px;white-space:normal;margin-top:2px">{{ row.spec.note }}</div>{% endif %}
           </td>
           <td class="tight">
-            {% if row.historical_running %}<span class="tag accent">回補中</span>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">已派工，完成前請重新整理</div>
+            {% if row.historical_running and row.historical_cursor %}<span class="tag accent">回補中</span>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px">進度 {{ row.historical_cursor }}　篇數會隨抓取增加</div>
+            {% elif row.historical_running or row.historical_queued %}<span class="tag warn">已派工</span>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px">worker 尚未接手；若超過數分鐘篇數仍不變，需重啟 Celery</div>
             {% elif row.source.historical_status == "done" %}<span class="tag ok">已完成</span>
               {% if row.source.historical_finished_at %}
                 <div style="font-size:11px;color:var(--text-3);margin-top:2px">{{ row.source.historical_finished_at|date:"m-d H:i" }}</div>

@@ -33,7 +33,8 @@ from apps.events.models import (
 from apps.review.service import ReviewError, approve, batch_approve, reject
 from apps.ingest.archives import get_archive_spec
 from apps.ingest.historical import (
-    historical_in_progress, mark_historical_started, source_coverage,
+    cursor_label, historical_in_progress, mark_historical_started,
+    source_coverage,
 )
 from apps.ingest.models import Document, ExternalSession, Source, SourceType
 from apps.ingest.services import (
@@ -436,6 +437,11 @@ def crawlers(request):
                 or (spec.earliest if spec else None)
             ),
             "historical_running": historical_in_progress(source, now),
+            "historical_cursor": cursor_label(source),
+            "historical_queued": (
+                source.historical_status == "running"
+                and not source.historical_cursor
+            ),
             "can_backfill": bool(
                 spec and spec.url_template and source.type in NEWS_POLL_TYPES
             ),

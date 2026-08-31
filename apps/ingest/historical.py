@@ -25,6 +25,8 @@ from apps.ingest.services import upsert_parsed_documents
 logger = logging.getLogger(__name__)
 
 HISTORICAL_STALE = dt.timedelta(minutes=30)
+#: 派工後一直沒有 cursor，多半是 worker 還在跑舊程式、不認得新任務。
+HISTORICAL_QUEUED_STALE = dt.timedelta(minutes=3)
 STATUS_IDLE = "idle"
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
@@ -64,7 +66,23 @@ def historical_in_progress(source: Source, now: dt.datetime | None = None) -> bo
     heartbeat = source.historical_updated_at or source.historical_started_at
     if heartbeat is None:
         return True
-    return now - heartbeat <= HISTORICAL_STALE
+    # 有 cursor 代表 worker 真的在跑；沒有則派工後很快就該出現。
+    limit = HISTORICAL_STALE if source.historical_cursor else HISTORICAL_QUEUED_STALE
+    return now - heartbeat <= limit
+
+
+def cursor_label(source: Source) -> str:
+    """給 UI 看的進度文字。"""
+    if not source.historical_cursor:
+        return ""
+    cursor = Cursor.from_json(source.historical_cursor)
+    if cursor.date:
+        return cursor.date.isoformat()
+    if cursor.offset:
+        return f"offset {cursor.offset}"
+    if cursor.page:
+        return f"第 {cursor.page} 頁"
+    return ""
 
 
 def mark_historical_started(source: Source, clock: Clock | None = None) -> None:
@@ -190,6 +208,7 @@ def ingest_archive_chunk(
             cursor = advance_cursor(spec, cursor)
             result.units += 1
             result.cursor = cursor.to_json()
+            _save_cursor(source, cursor, clock.now())
 
         if spec.kind == KIND_DATE and cursor.date is not None and cursor.date > today:
             result.done = True
