@@ -12,7 +12,7 @@
     /review/<slug>/  單一事件審核
     /documents/  文件檢索
     /pipeline/   管線狀態與來源健康度
-    /crawlers/   爬蟲排程與手動觸發
+    /crawlers/   爬蟲排程、覆蓋日期與歷史回補
     /costs/      LLM 用量與成本
 """
 from __future__ import annotations
@@ -31,12 +31,16 @@ from apps.events.models import (
     InvalidTransition, RiskTier, WordingGateFailed,
 )
 from apps.review.service import ReviewError, approve, batch_approve, reject
+from apps.ingest.archives import get_archive_spec
+from apps.ingest.historical import (
+    historical_in_progress, mark_historical_started, source_coverage,
+)
 from apps.ingest.models import Document, ExternalSession, Source, SourceType
 from apps.ingest.services import (
     FAILURE_THRESHOLD, effective_interval_minutes, mark_poll_started,
     poll_in_progress, should_poll,
 )
-from apps.ingest.tasks import dispatch_poll
+from apps.ingest.tasks import NEWS_POLL_TYPES, dispatch_historical, dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
 from apps.llm.models import LlmPurpose, LlmUsage
 from apps.web.permissions import Role, require_role
@@ -410,14 +414,31 @@ def crawlers(request):
     會讓「看數字」與「按按鈕」互相干擾，拆開比較不會誤觸。
     """
     now = timezone.now()
+    coverage = source_coverage()
     rows = []
     for source in Source.objects.order_by("-enabled", "name"):
+        cov = coverage.get(source.id) or {}
+        spec = get_archive_spec(source.slug)
+        oldest = cov.get("oldest")
+        newest = cov.get("newest")
         rows.append({
             "source": source,
             "effective_interval": effective_interval_minutes(source),
             "due_now": should_poll(source) if source.enabled else False,
             "unhealthy": source.consecutive_failures >= FAILURE_THRESHOLD,
             "in_progress": poll_in_progress(source, now),
+            "oldest": timezone.localtime(oldest).date() if oldest else None,
+            "newest": timezone.localtime(newest).date() if newest else None,
+            "doc_count": cov.get("n") or 0,
+            "spec": spec,
+            "archive_earliest": (
+                source.archive_earliest_on_site
+                or (spec.earliest if spec else None)
+            ),
+            "historical_running": historical_in_progress(source, now),
+            "can_backfill": bool(
+                spec and spec.url_template and source.type in NEWS_POLL_TYPES
+            ),
         })
 
     sessions = []
@@ -519,6 +540,65 @@ def crawler_update(request, slug):
         "service_window_start_hour", "service_window_end_hour", "updated_at",
     ])
     messages.success(request, f"已更新「{source.name}」的排程設定")
+    return redirect("web:crawlers")
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def crawler_history(request, slug):
+    """手動觸發單一來源從古至今回補。可重複執行（寫入冪等）。"""
+    source = get_object_or_404(Source, slug=slug)
+    if historical_in_progress(source):
+        messages.error(request, f"「{source.name}」的歷史回補仍在進行中")
+        return redirect("web:crawlers")
+    try:
+        mark_historical_started(source)
+        dispatch_historical(source)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("web:crawlers")
+    spec = get_archive_spec(source.slug)
+    start = (
+        source.archive_earliest_on_site
+        or (spec.earliest if spec else None)
+    )
+    extra = f"，自 {start.isoformat()} 起" if start else ""
+    messages.success(
+        request,
+        f"已派發「{source.name}」的歷史回補{extra}，完成前請重新整理",
+    )
+    return redirect("web:crawlers")
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def crawler_history_all(request):
+    """派發所有有歷史清單路徑的新聞來源。"""
+    dispatched = []
+    skipped = []
+    for source in Source.objects.filter(type__in=NEWS_POLL_TYPES).order_by("slug"):
+        spec = get_archive_spec(source.slug)
+        if spec is None or not spec.url_template:
+            skipped.append(source.name)
+            continue
+        if historical_in_progress(source):
+            skipped.append(f"{source.name}（進行中）")
+            continue
+        mark_historical_started(source)
+        dispatch_historical(source)
+        dispatched.append(source.name)
+    if dispatched:
+        messages.success(
+            request,
+            f"已派發 {len(dispatched)} 個來源的歷史回補：{'、'.join(dispatched)}",
+        )
+    if skipped:
+        messages.error(
+            request,
+            f"未派發：{'、'.join(skipped)}",
+        )
+    if not dispatched and not skipped:
+        messages.error(request, "沒有可回補的新聞來源")
     return redirect("web:crawlers")
 
 

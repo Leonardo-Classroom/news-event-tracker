@@ -188,6 +188,28 @@ class TestIngestSource:
         assert result.ok
         assert fetcher.calls == [source.feed_url]
 
+    def test_清單沒給時間不覆蓋已有published_at(self, source):
+        """歷史回補與即時輪詢會重跑同一 URL，None 不可把內頁補上的時間抹掉。"""
+        from apps.ingest.models import ContentClass, Document
+
+        kept = dt.datetime(2016, 7, 1, 8, 30, tzinfo=UTC)
+        Document.objects.create(
+            source=source, url="https://example.test/news/nodate",
+            title="舊", content_class=ContentClass.COPYRIGHTED,
+            published_at=kept,
+        )
+        rss = """<?xml version="1.0"?><rss version="2.0"><channel>
+          <item><title>新標題</title>
+          <link>https://example.test/news/nodate</link></item>
+        </channel></rss>"""
+        ingest_source(
+            source, fetcher=FakeFetcher({source.base_url: rss}),
+            clock=FixedClock(dt.datetime(2026, 8, 31, tzinfo=UTC)),
+        )
+        doc = Document.objects.get(url="https://example.test/news/nodate")
+        assert doc.published_at == kept
+        assert doc.title == "新標題"
+
 
 @pytest.mark.medium
 class TestFillMissingPublishedAt:

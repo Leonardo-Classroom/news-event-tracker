@@ -191,6 +191,26 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
 td.tight { white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
+td.mono, th.mono, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+details.fold {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-bottom: 14px;
+}
+details.fold > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  list-style: none;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: "▸ "; color: var(--text-3); }
+details.fold[open] > summary::before { content: "▾ "; }
+details.fold > .body { padding: 0 12px 12px; border-top: 1px solid var(--border); }
 
 /* 狀態標籤 */
 .tag {

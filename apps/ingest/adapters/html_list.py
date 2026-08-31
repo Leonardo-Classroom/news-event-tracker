@@ -112,6 +112,22 @@ CTEE_CONFIG = ListConfig(
     label="工商時報",
 )
 
+# ETtoday 日清單：/news/news-list-YYYY-MM-DD-0.htm
+# 文章在 div.part_list_2 h3 a，URL 形如 ettoday.net/news/1615415
+# （含子網域 finance.ettoday.net 等）。不可誤吃 news-list- 本身。
+ETTODAY_CONFIG = ListConfig(
+    href_pattern=re.compile(r"ettoday\.net/news/\d+"),
+    link_selector="div.part_list_2 h3 a",
+    label="ETtoday",
+)
+
+# 公視即時：/dailynews?page=N，文章 /article/{id}
+PTS_CONFIG = ListConfig(
+    href_pattern=re.compile(r"/article/\d+"),
+    link_selector="a",
+    label="公視新聞",
+)
+
 
 @register_adapter("udn")
 class UdnListAdapter(HtmlListAdapter):
@@ -129,3 +145,15 @@ class ChinaTimesListAdapter(HtmlListAdapter):
 class CteeListAdapter(HtmlListAdapter):
     def __init__(self):
         super().__init__(CTEE_CONFIG)
+
+
+@register_adapter("ettoday")
+class EttodayListAdapter(HtmlListAdapter):
+    def __init__(self):
+        super().__init__(ETTODAY_CONFIG)
+
+
+@register_adapter("pts")
+class PtsListAdapter(HtmlListAdapter):
+    def __init__(self):
+        super().__init__(PTS_CONFIG)

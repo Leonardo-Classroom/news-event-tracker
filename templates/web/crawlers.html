@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>爬蟲</h1>
-  <span class="sub">排程設定與手動觸發——健康度與覆蓋率見「管線狀態」</span>
+  <span class="sub">排程設定與手動觸發——最舊／最新是庫內已入庫的發布時間，不是即時輪詢的成功時間</span>
 </div>
 
 {% if sessions %}
@@ -42,7 +42,9 @@
     <thead><tr>
       <th>來源</th><th>型別</th>
       <th>排程設定</th>
-      <th>狀態</th><th class="num">下次到期</th><th></th>
+      <th>狀態</th><th class="num">下次到期</th>
+      <th class="num">最舊</th><th class="num">最新</th><th class="num">篇數</th>
+      <th></th>
     </tr></thead>
     <tbody>
     {% for row in rows %}
@@ -87,6 +89,15 @@
           {% elif row.due_now %}<span class="tag accent">現在</span>
           {% else %}{{ row.effective_interval }} 分內{% endif %}
         </td>
+        <td class="num tight mono">
+          {% if row.oldest %}{{ row.oldest|date:"Y-m-d" }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="num tight mono">
+          {% if row.newest %}{{ row.newest|date:"Y-m-d" }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="num tight mono">{{ row.doc_count }}</td>
         <td class="tight">
           <form method="post" action="{% url 'web:crawler_run' row.source.slug %}">
             {% csrf_token %}
@@ -95,10 +106,69 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="6" class="empty">尚無註冊的來源</td></tr>
+      <tr><td colspan="9" class="empty">尚無註冊的來源</td></tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
 </div>
+
+<details class="fold">
+  <summary>高級功能：從古至今回補</summary>
+  <div class="body">
+    <p style="color:var(--text-2);margin:8px 0 12px">
+      即時輪詢只抓當天清單或 RSS 近況。這裡改走各站歷史日檔／分頁／API，
+      從站台還能翻到的最早日期掃到今天。寫入是 upsert，可重複觸發。
+      回補不計入來源健康度，失敗不會讓「立即爬取」被記成連續失敗。
+      RSS 來源的清單 API 往往只有近幾天，日期以實測為準。
+    </p>
+    <form method="post" action="{% url 'web:crawler_history_all' %}" style="margin-bottom:12px"
+          onsubmit="return confirm('將派發所有新聞來源的歷史回補，可能跑數小時到數天。確定？')">
+      {% csrf_token %}
+      <button class="btn primary">全部新聞來源從古至今回補</button>
+    </form>
+    <div class="table-scroll">
+    <table>
+      <thead><tr>
+        <th>來源</th><th>站台可回溯</th><th>回補狀態</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td class="tight"><b>{{ row.source.name }}</b><br><span style="color:var(--text-3)">{{ row.source.slug }}</span></td>
+          <td class="tight">
+            {% if row.archive_earliest %}<span class="mono">{{ row.archive_earliest|date:"Y-m-d" }}</span>
+            {% else %}—{% endif %}
+            {% if row.spec %}<div style="font-size:11px;color:var(--text-3);max-width:360px;white-space:normal;margin-top:2px">{{ row.spec.note }}</div>{% endif %}
+          </td>
+          <td class="tight">
+            {% if row.historical_running %}<span class="tag accent">回補中</span>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px">已派工，完成前請重新整理</div>
+            {% elif row.source.historical_status == "done" %}<span class="tag ok">已完成</span>
+              {% if row.source.historical_finished_at %}
+                <div style="font-size:11px;color:var(--text-3);margin-top:2px">{{ row.source.historical_finished_at|date:"m-d H:i" }}</div>
+              {% endif %}
+            {% elif row.source.historical_status == "error" %}<span class="tag danger">失敗</span>
+              {% if row.source.historical_error %}
+                <div style="font-size:11px;color:var(--text-3);margin-top:2px;max-width:280px;white-space:normal">{{ row.source.historical_error }}</div>
+              {% endif %}
+            {% elif row.can_backfill %}<span class="tag muted">未執行</span>
+            {% else %}<span class="tag muted">無歷史清單</span>{% endif %}
+          </td>
+          <td class="tight">
+            {% if row.can_backfill %}
+            <form method="post" action="{% url 'web:crawler_history' row.source.slug %}">
+              {% csrf_token %}
+              <button class="btn" style="padding:2px 10px"
+                      {% if row.historical_running %}disabled{% endif %}>歷史回補</button>
+            </form>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</details>
 {% endblock %}

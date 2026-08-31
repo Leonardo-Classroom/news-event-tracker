@@ -69,6 +69,20 @@ class HttpFetcher:
             headers=dict(resp.headers),
         )
 
+    def post(self, url: str, *, json: dict | None = None,
+             timeout: float = 30.0) -> FetchResult:
+        """中央社清單 API（WNewsList）只接受 POST。"""
+        try:
+            resp = self._client.post(url, json=json, timeout=timeout)
+        except httpx.HTTPError as exc:
+            raise FetchError(f"{url}: {exc}") from exc
+        return FetchResult(
+            url=str(resp.url),
+            status_code=resp.status_code,
+            text=resp.text,
+            headers=dict(resp.headers),
+        )
+
     def close(self) -> None:
         self._client.close()
 
@@ -95,3 +109,13 @@ class FakeFetcher:
         if isinstance(value, FetchResult):
             return value
         return FetchResult(url=url, status_code=200, text=value)
+
+    def post(self, url: str, *, json: dict | None = None,
+             timeout: float = 30.0) -> FetchResult:
+        """POST 以 URL 加排序後的 query 當查找鍵，讓同一端點的不同頁可分開登記。"""
+        if json:
+            from urllib.parse import urlencode
+            tagged = url + "?" + urlencode({k: json[k] for k in sorted(json)})
+            if tagged in self.responses:
+                return self.get(tagged, timeout=timeout)
+        return self.get(url, timeout=timeout)

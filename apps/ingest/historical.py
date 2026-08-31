@@ -1,0 +1,213 @@
+"""從古至今回補：走歷史清單、冪等寫入，不碰即時輪詢的健康度。
+
+切成短任務由 Celery 自再入列，是因為日期走訪（聯合 2016 起每天一頁、
+ETtoday 2012 起每天一頁）單次可達數千 HTTP，不能放進一個 worker 時限。
+"""
+from __future__ import annotations
+
+import datetime as dt
+import logging
+from dataclasses import dataclass
+
+from django.db.models import Count, Max, Min
+from django.utils import timezone
+
+from apps.core.clock import Clock, SystemClock
+from apps.ingest.archives import (
+    KIND_DATE, KIND_OFFSET, KIND_PAGE, TAIPEI, ArchiveSpec, Cursor,
+    advance_cursor, apply_archive_date, build_request, fingerprint_urls,
+    get_archive_spec, initial_cursor, parse_archive_documents,
+)
+from apps.ingest.fetchers import FetchError, Fetcher, HttpFetcher
+from apps.ingest.models import Document, Source
+from apps.ingest.services import upsert_parsed_documents
+
+logger = logging.getLogger(__name__)
+
+HISTORICAL_STALE = dt.timedelta(minutes=30)
+STATUS_IDLE = "idle"
+STATUS_RUNNING = "running"
+STATUS_DONE = "done"
+STATUS_ERROR = "error"
+
+
+@dataclass
+class ArchiveResult:
+    source_slug: str
+    fetched: int = 0
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    units: int = 0
+    done: bool = False
+    error: str = ""
+    cursor: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.error
+
+
+def source_coverage() -> dict[int, dict]:
+    """各來源庫內最舊／最新 ``published_at`` 與篇數。一次聚合，不當迴圈查。"""
+    rows = (Document.objects.values("source_id")
+            .annotate(oldest=Min("published_at"),
+                      newest=Max("published_at"),
+                      n=Count("id")))
+    return {row["source_id"]: row for row in rows}
+
+
+def historical_in_progress(source: Source, now: dt.datetime | None = None) -> bool:
+    if source.historical_status != STATUS_RUNNING:
+        return False
+    now = now or timezone.now()
+    heartbeat = source.historical_updated_at or source.historical_started_at
+    if heartbeat is None:
+        return True
+    return now - heartbeat <= HISTORICAL_STALE
+
+
+def mark_historical_started(source: Source, clock: Clock | None = None) -> None:
+    """每次手動觸發都從頭走——寫入是 upsert，重跑只是再掃一次。"""
+    now = (clock or SystemClock()).now()
+    spec = get_archive_spec(source.slug)
+    source.historical_status = STATUS_RUNNING
+    source.historical_cursor = ""
+    source.historical_started_at = now
+    source.historical_updated_at = now
+    source.historical_finished_at = None
+    source.historical_error = ""
+    if spec and spec.earliest and source.archive_earliest_on_site is None:
+        source.archive_earliest_on_site = spec.earliest
+    source.save(update_fields=[
+        "historical_status", "historical_cursor", "historical_started_at",
+        "historical_updated_at", "historical_finished_at", "historical_error",
+        "archive_earliest_on_site", "updated_at",
+    ])
+
+
+def _finish(source: Source, now: dt.datetime, status: str, error: str = "") -> None:
+    source.historical_status = status
+    source.historical_updated_at = now
+    source.historical_finished_at = now
+    source.historical_error = error[:2000]
+    source.save(update_fields=[
+        "historical_status", "historical_updated_at", "historical_finished_at",
+        "historical_error", "updated_at",
+    ])
+
+
+def _save_cursor(source: Source, cursor: Cursor, now: dt.datetime) -> None:
+    source.historical_status = STATUS_RUNNING
+    source.historical_cursor = cursor.to_json()
+    source.historical_updated_at = now
+    source.save(update_fields=[
+        "historical_status", "historical_cursor", "historical_updated_at",
+        "updated_at",
+    ])
+
+
+def _fetch_raw(fetcher: Fetcher, spec: ArchiveSpec, request) -> str:
+    if spec.method == "POST" and hasattr(fetcher, "post"):
+        response = fetcher.post(request.url, json=request.body)
+    else:
+        response = fetcher.get(request.url)
+    if not response.ok:
+        raise FetchError(f"HTTP {response.status_code}")
+    return response.text
+
+
+def ingest_archive_chunk(
+    source: Source,
+    *,
+    fetcher: Fetcher | None = None,
+    clock: Clock | None = None,
+    max_units: int | None = None,
+) -> ArchiveResult:
+    """處理一小段歷史清單。未走完時 ``done=False``，呼叫端再入列。"""
+    spec = get_archive_spec(source.slug)
+    result = ArchiveResult(source_slug=source.slug)
+    if spec is None or not spec.url_template or spec.max_units == 0:
+        now = (clock or SystemClock()).now()
+        result.error = (spec.note if spec else "沒有歷史清單路徑")
+        result.done = True
+        _finish(source, now, STATUS_ERROR, result.error)
+        return result
+
+    clock = clock or SystemClock()
+    owns_fetcher = fetcher is None
+    fetcher = fetcher or HttpFetcher()
+    now = clock.now()
+    today = now.astimezone(TAIPEI).date()
+    limit = max_units if max_units is not None else spec.chunk_size
+
+    cursor = (Cursor.from_json(source.historical_cursor)
+              if source.historical_cursor else initial_cursor(spec))
+    if spec.kind == KIND_DATE and cursor.date is None:
+        cursor = initial_cursor(spec)
+
+    try:
+        while result.units < limit:
+            if spec.kind == KIND_DATE and cursor.date is not None and cursor.date > today:
+                result.done = True
+                break
+            if cursor.units_done >= spec.max_units:
+                result.done = True
+                break
+
+            request = build_request(spec, cursor)
+            try:
+                raw = _fetch_raw(fetcher, spec, request)
+                docs = parse_archive_documents(
+                    spec, raw, base_url=source.base_url)
+            except FetchError as exc:
+                # 單日／單頁失敗往前走，不中斷整段回補。
+                logger.warning("歷史清單 %s %s：%s", source.slug, request.url, exc)
+                docs = []
+
+            docs = apply_archive_date(docs, spec, cursor)
+            urls = [d.url for d in docs if d.url]
+            fp = fingerprint_urls(urls) if urls else ""
+
+            if spec.kind in (KIND_PAGE, KIND_OFFSET) and not urls:
+                result.done = True
+                break
+            if (spec.kind == KIND_PAGE and cursor.page > 1
+                    and fp and fp == cursor.first_fp):
+                result.done = True
+                break
+
+            if urls:
+                created, updated, skipped = upsert_parsed_documents(
+                    source, docs, now)
+                result.fetched += len(docs)
+                result.created += created
+                result.updated += updated
+                result.skipped += skipped
+                if spec.kind == KIND_PAGE and cursor.page == 1 and not cursor.first_fp:
+                    cursor.first_fp = fp
+
+            cursor = advance_cursor(spec, cursor)
+            result.units += 1
+            result.cursor = cursor.to_json()
+
+        if spec.kind == KIND_DATE and cursor.date is not None and cursor.date > today:
+            result.done = True
+        if cursor.units_done >= spec.max_units:
+            result.done = True
+    except Exception as exc:
+        result.error = str(exc)[:2000]
+        _finish(source, clock.now(), STATUS_ERROR, result.error)
+        logger.exception("歷史回補 %s 失敗", source.slug)
+        return result
+    finally:
+        if owns_fetcher and hasattr(fetcher, "close"):
+            fetcher.close()
+
+    now = clock.now()
+    if result.done:
+        source.historical_cursor = cursor.to_json()
+        _finish(source, now, STATUS_DONE)
+    else:
+        _save_cursor(source, cursor, now)
+    return result

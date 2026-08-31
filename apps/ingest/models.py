@@ -84,6 +84,25 @@ class Source(models.Model):
     consecutive_failures = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True)
 
+    # 歷史回補（任務 61）。與即時輪詢的健康度分開——歷史清單 404
+    # 不該讓「立即爬取」被記成連續失敗。
+    historical_status = models.CharField(
+        max_length=16, default="idle",
+        help_text="idle / running / done / error",
+    )
+    historical_cursor = models.TextField(
+        blank=True,
+        help_text="回補進度（日期、頁碼或 offset 的 JSON）",
+    )
+    historical_started_at = models.DateTimeField(null=True, blank=True)
+    historical_updated_at = models.DateTimeField(null=True, blank=True)
+    historical_finished_at = models.DateTimeField(null=True, blank=True)
+    historical_error = models.TextField(blank=True)
+    archive_earliest_on_site = models.DateField(
+        null=True, blank=True,
+        help_text="站台歷史清單實測可回溯的最早日期",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

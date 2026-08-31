@@ -120,31 +120,44 @@ def ingest_source(
         return result
 
     result.fetched = len(parsed)
-
-    for doc in parsed:
-        if not doc.url:
-            result.skipped += 1
-            continue
-        with transaction.atomic():
-            _, created = Document.objects.update_or_create(
-                url=doc.url,
-                defaults={
-                    "source": source,
-                    "title": doc.title[:512],
-                    "published_at": doc.published_at,
-                    "author": doc.author,
-                    "external_id": doc.external_id,
-                    "content_class": source.content_class,
-                    "fetched_at": now,
-                },
-            )
-        if created:
-            result.created += 1
-        else:
-            result.updated += 1
+    created, updated, skipped = upsert_parsed_documents(source, parsed, now)
+    result.created = created
+    result.updated = updated
+    result.skipped = skipped
 
     _record_success(source, now)
     return result
+
+
+def upsert_parsed_documents(source: Source, parsed, now) -> tuple[int, int, int]:
+    """冪等寫入。清單沒給時間時不覆蓋已有的 ``published_at``——
+
+    歷史回補與即時輪詢會重跑同一 URL。若這裡用 None 覆寫，內頁補上的
+    時間會在下一次清單抓取被抹掉，最舊／最新日期就永遠不穩。
+    """
+    created = updated = skipped = 0
+    for doc in parsed:
+        if not doc.url:
+            skipped += 1
+            continue
+        defaults = {
+            "source": source,
+            "title": doc.title[:512],
+            "author": doc.author,
+            "external_id": doc.external_id,
+            "content_class": source.content_class,
+            "fetched_at": now,
+        }
+        if doc.published_at:
+            defaults["published_at"] = doc.published_at
+        with transaction.atomic():
+            _, was_created = Document.objects.update_or_create(
+                url=doc.url, defaults=defaults)
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+    return created, updated, skipped
 
 
 def mark_poll_started(source: Source, clock: Clock | None = None) -> None:

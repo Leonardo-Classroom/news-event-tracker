@@ -225,3 +225,54 @@ def dedupe_recent_documents(hours: int = 72) -> dict:
 
     result = dedupe_recent(hours=hours)
     return {"examined": result.examined, "linked": result.linked}
+
+
+@shared_task(
+    bind=True,
+    name="apps.ingest.tasks.historical_backfill_source",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=600,
+    time_limit=660,
+)
+def historical_backfill_source(self, source_id: int,
+                               max_units: int | None = None) -> dict:
+    """從古至今回補一小段，未走完則再入列。
+
+    不走 browser 佇列：歷史清單實測皆可純 HTTP（聯合日檔、ETtoday
+    日清單、報導者 API、公視分頁、中時近況分頁）。即時輪詢仍用
+    Playwright 的站台，歷史路徑與即時路徑本來就不同。
+    """
+    from apps.ingest.historical import ingest_archive_chunk
+
+    source = Source.objects.get(pk=source_id)
+    result = ingest_archive_chunk(source, max_units=max_units)
+    logger.info(
+        "歷史回補 %s：取得 %d、新增 %d、更新 %d、單位 %d%s",
+        result.source_slug, result.fetched, result.created, result.updated,
+        result.units,
+        "、完成" if result.done else "、續跑",
+    )
+    if result.ok and not result.done:
+        historical_backfill_source.delay(source_id)
+    return {
+        "source": result.source_slug,
+        "fetched": result.fetched,
+        "created": result.created,
+        "updated": result.updated,
+        "units": result.units,
+        "done": result.done,
+        "error": result.error,
+    }
+
+
+def dispatch_historical(source: Source):
+    """派發單一來源的歷史回補。司法來源沒有新聞清單，拒絕。"""
+    from apps.ingest.archives import get_archive_spec
+
+    spec = get_archive_spec(source.slug)
+    if spec is None:
+        raise ValueError(f"「{source.name}」沒有歷史清單路徑")
+    if source.type not in NEWS_POLL_TYPES:
+        raise ValueError(f"「{source.name}」不是新聞來源，不走歷史新聞回補")
+    return historical_backfill_source.delay(source.pk)

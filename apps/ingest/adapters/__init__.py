@@ -5,8 +5,8 @@
 """
 from .base import Adapter, ParsedDocument, get_adapter, register_adapter
 from .html_list import (
-    ChinaTimesListAdapter, CteeListAdapter, HtmlListAdapter, ListConfig,
-    UdnListAdapter,
+    ChinaTimesListAdapter, CteeListAdapter, EttodayListAdapter,
+    HtmlListAdapter, ListConfig, PtsListAdapter, UdnListAdapter,
 )
 from .rss import RssAdapter
 
@@ -14,4 +14,5 @@ __all__ = [
     "Adapter", "ParsedDocument", "get_adapter", "register_adapter",
     "RssAdapter", "HtmlListAdapter", "ListConfig",
     "UdnListAdapter", "ChinaTimesListAdapter", "CteeListAdapter",
+    "EttodayListAdapter", "PtsListAdapter",
 ]

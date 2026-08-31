@@ -102,6 +102,73 @@ class TestCrawlersView:
         crawl_source.refresh_from_db()
         assert crawl_source.service_window_start_hour is None
 
+    def test_列表顯示最舊最新日期與篇數(self, admin_client, crawl_source):
+        from apps.ingest.models import ContentClass, Document
+
+        Document.objects.create(
+            source=crawl_source, url="https://example.test/old",
+            title="舊", content_class=ContentClass.COPYRIGHTED,
+            published_at=dt.datetime(2016, 7, 1, 12, tzinfo=UTC),
+        )
+        Document.objects.create(
+            source=crawl_source, url="https://example.test/new",
+            title="新", content_class=ContentClass.COPYRIGHTED,
+            published_at=dt.datetime(2026, 8, 31, 4, tzinfo=UTC),
+        )
+        html = admin_client.get("/crawlers/").content.decode()
+        assert "2016-07-01" in html
+        assert "2026-08-31" in html
+        assert "高級功能：從古至今回補" in html
+        assert "最舊" in html and "最新" in html
+
+    def test_歷史回補會派工(self, admin_client, db):
+        source = Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+        )
+        with patch("apps.web.views.dispatch_historical") as mocked:
+            response = admin_client.post(f"/crawlers/{source.slug}/history/")
+        mocked.assert_called_once()
+        assert mocked.call_args[0][0].pk == source.pk
+        assert response.status_code == 302
+        source.refresh_from_db()
+        assert source.historical_status == "running"
+        html = admin_client.get("/crawlers/").content.decode()
+        assert "回補中" in html
+
+    def test_歷史回補要求POST(self, admin_client, crawl_source):
+        with patch("apps.web.views.dispatch_historical") as mocked:
+            response = admin_client.get(f"/crawlers/{crawl_source.slug}/history/")
+        mocked.assert_not_called()
+        assert response.status_code == 405
+
+    def test_進行中的歷史回補不重複派工(self, admin_client, db):
+        source = Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+            historical_status="running",
+            historical_updated_at=dt.datetime.now(UTC),
+        )
+        with patch("apps.web.views.dispatch_historical") as mocked:
+            admin_client.post(f"/crawlers/{source.slug}/history/")
+        mocked.assert_not_called()
+
+    def test_全部回補略過司法來源(self, admin_client, db):
+        Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+        )
+        Source.objects.create(
+            slug="judicial-search", name="司法院公開查詢",
+            type=SourceType.JUDICIAL_API,
+            base_url="https://judgment.judicial.gov.tw",
+        )
+        with patch("apps.web.views.dispatch_historical") as mocked:
+            admin_client.post("/crawlers/history/all/")
+        slugs = [c.args[0].slug for c in mocked.call_args_list]
+        assert "udn" in slugs
+        assert "judicial-search" not in slugs
+
 
 class TestExternalSession:
     def test_列表頁自動建立登記過的外部session(self, admin_client, db):
