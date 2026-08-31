@@ -60,8 +60,14 @@ class TestCheckDueEvents:
             summary = check_due_events()
         assert summary.events_checked == 0
 
-    def test_未設定session時回報過期不拋例外(self, due_event, db):
-        summary = check_due_events()
+    def test_未設定session時仍嘗試下載公開檔(self, due_event, db):
+        """公開檔不需 cookie；會員限定檔才會在 download 時拋 SessionExpired。"""
+        with patch("apps.events.official_check.list_monthly_archives",
+                   return_value=[ARCHIVE]), \
+             patch("apps.events.official_check.download_archive",
+                   side_effect=SessionExpired("需登入")) as mocked_dl:
+            summary = check_due_events()
+        mocked_dl.assert_called_once()
         assert summary.session_expired is True
         assert summary.events_checked == 0
 

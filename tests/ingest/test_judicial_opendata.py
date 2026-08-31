@@ -92,14 +92,16 @@ class TestParseDatasetDate:
 
 
 class TestListMonthlyArchives:
-    def test_只回傳需登入的類別且依日期排序(self):
+    def test_只收月封存檔標題並依日期排序(self):
+        """用語辭典也會被 keyword=裁判書 搜到，但它不是逐案 JSON。
+        分類 A/B 不當作排除條件——公開的月封存檔同樣要收。"""
         fake_response = MagicMock()
         fake_response.json.return_value = {"pagedList": {"items": [
             {"datasetId": 1, "title": "裁判書用語辭典", "categoryDataset": "A",
              "filesetLists": [{"fileSetId": 100}], "publishedDate": "2024-06-04T16:00:00.95+08:00"},
             {"datasetId": 2, "title": "202605裁判書", "categoryDataset": "B",
              "filesetLists": [{"fileSetId": 200}], "publishedDate": "2026-07-01T00:00:00.5+08:00"},
-            {"datasetId": 3, "title": "202606裁判書", "categoryDataset": "B",
+            {"datasetId": 3, "title": "202606裁判書--(20260816Update)", "categoryDataset": "A",
              "filesetLists": [{"fileSetId": 300}], "publishedDate": "2026-08-16T00:00:00.123+08:00"},
         ]}}
         fake_response.raise_for_status = MagicMock()
@@ -107,7 +109,9 @@ class TestListMonthlyArchives:
         with patch("apps.ingest.judicial_opendata.requests.get", return_value=fake_response):
             archives = list_monthly_archives()
 
-        assert [a.dataset_id for a in archives] == [3, 2]  # 免登入的類別 A 被排除，且新到舊
+        assert [a.dataset_id for a in archives] == [3, 2]
+        assert archives[0].gated is False
+        assert archives[1].gated is True
 
     def test_無檔案的資料集被排除(self):
         fake_response = MagicMock()
@@ -123,11 +127,42 @@ class TestListMonthlyArchives:
 class TestDownloadArchive:
     ARCHIVE = MonthlyArchive(dataset_id=1, title="t", fileset_id=100, published_at=None)
 
-    def test_未設定session拋出SessionExpired(self, db):
+    def _json_denied(self):
+        resp = MagicMock(status_code=500, content=b'{"succeeded":false}')
+        resp.headers = {"Content-Type": "application/json"}
+        return resp
+
+    def _file_ok(self, payload=b"RAR-DATA"):
+        resp = MagicMock(status_code=200, content=payload)
+        resp.headers = {"Content-Type": "application/octet-stream"}
+        return resp
+
+    def test_公開檔不需session(self):
+        with patch("apps.ingest.judicial_opendata.requests.get",
+                   return_value=self._file_ok()) as mocked:
+            result = download_archive(self.ARCHIVE, session=None)
+        assert result == b"RAR-DATA"
+        assert "Cookie" not in mocked.call_args.kwargs["headers"]
+
+    def test_會員限定無session時拋SessionExpired(self, db):
         session = ExternalSession.objects.create(
             slug="t", name="測試平台", login_url="https://example.test/login")
-        with pytest.raises(SessionExpired):
-            download_archive(self.ARCHIVE, session=session)
+        with patch("apps.ingest.judicial_opendata.requests.get",
+                   return_value=self._json_denied()):
+            with pytest.raises(SessionExpired):
+                download_archive(self.ARCHIVE, session=session)
+
+    def test_會員限定先裸抓失敗再帶cookie(self, db):
+        session = ExternalSession.objects.create(
+            slug="t", name="測試平台", login_url="https://example.test/login",
+            cookie_header="valid=1",
+        )
+        with patch("apps.ingest.judicial_opendata.requests.get",
+                   side_effect=[self._json_denied(), self._file_ok()]) as mocked:
+            result = download_archive(self.ARCHIVE, session=session)
+        assert result == b"RAR-DATA"
+        assert "Cookie" not in mocked.call_args_list[0].kwargs["headers"]
+        assert mocked.call_args_list[1].kwargs["headers"]["Cookie"] == "valid=1"
 
     def test_未授權回應視為session過期而非查無資料(self, db):
         """實測發現的兩種失效模式必須分清楚：未登入時下載端點回傳的
@@ -138,23 +173,10 @@ class TestDownloadArchive:
             slug="t", name="測試平台", login_url="https://example.test/login",
             cookie_header="stale=1",
         )
-        fake_response = MagicMock(status_code=500)
-        fake_response.headers = {"Content-Type": "application/json"}
-        with patch("apps.ingest.judicial_opendata.requests.get", return_value=fake_response):
+        with patch("apps.ingest.judicial_opendata.requests.get",
+                   return_value=self._json_denied()):
             with pytest.raises(SessionExpired):
                 download_archive(self.ARCHIVE, session=session)
-
-    def test_成功下載回傳內容(self, db):
-        session = ExternalSession.objects.create(
-            slug="t", name="測試平台", login_url="https://example.test/login",
-            cookie_header="valid=1",
-        )
-        fake_response = MagicMock(status_code=200, content=b"RAR-DATA")
-        fake_response.headers = {"Content-Type": "application/octet-stream"}
-        with patch("apps.ingest.judicial_opendata.requests.get", return_value=fake_response) as mocked:
-            result = download_archive(self.ARCHIVE, session=session)
-        assert result == b"RAR-DATA"
-        assert mocked.call_args.kwargs["headers"]["Cookie"] == "valid=1"
 
 
 class TestFindCaseInArchive:

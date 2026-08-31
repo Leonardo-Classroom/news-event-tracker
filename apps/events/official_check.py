@@ -82,10 +82,9 @@ def check_due_events(*, months_back: int = 2, dry_run: bool = False) -> Official
         return summary
 
     session = ExternalSession.objects.filter(slug=JUDICIAL_OPENDATA_SESSION_SLUG).first()
-    if session is None or not session.is_set:
-        logger.warning("司法院資料開放平台尚未設定登入 session，無法檢查")
-        summary.session_expired = True
-        return summary
+    # 不在這裡因「沒 cookie」整批放棄——公開檔（category A）不需
+    # 登入。會員限定檔下載時若仍缺 session，download_fileset 會拋
+    # SessionExpired，下面既有的中止邏輯會接住。
 
     # case_number 字串 → 該案號所屬的事件。多個事件理論上不該共用同一
     # 案號（那代表歸屬有誤），但用 dict 而非直接假設一對一，
