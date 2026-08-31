@@ -31,7 +31,7 @@ from apps.events.models import (
     InvalidTransition, RiskTier, WordingGateFailed,
 )
 from apps.review.service import ReviewError, approve, batch_approve, reject
-from apps.ingest.models import Document, ExternalSession, Source
+from apps.ingest.models import Document, ExternalSession, Source, SourceType
 from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, should_poll
 from apps.ingest.tasks import dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
@@ -461,8 +461,18 @@ def crawler_run(request, slug):
     「最後成功時間」「連續失敗次數」自然反映出來。
     """
     source = get_object_or_404(Source, slug=slug)
-    dispatch_poll(source)
-    messages.success(request, f"已派發「{source.name}」的爬取任務，稍後重新整理查看結果")
+    try:
+        dispatch_poll(source)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("web:crawlers")
+    if source.type == SourceType.JUDICIAL_API:
+        messages.success(
+            request,
+            f"已派發「{source.name}」的官方源檢查（月封存檔，不是 RSS）",
+        )
+    else:
+        messages.success(request, f"已派發「{source.name}」的爬取任務，稍後重新整理查看結果")
     return redirect("web:crawlers")
 
 

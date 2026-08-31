@@ -21,6 +21,11 @@ from apps.ingest.browser import RenderOptions
 from apps.ingest.models import Source, SourceType
 from apps.ingest.services import ingest_source, should_poll
 
+#: 清單輪詢只適用於新聞來源。司法院公開查詢介面不是 feed，
+#: 拿 HTML 當 RSS 解析會得到「not well-formed」然後連續失敗——
+#: 那條路已被月封存檔（``check_official_records``）取代。
+NEWS_POLL_TYPES = frozenset({SourceType.NEWS_RSS, SourceType.NEWS_SCRAPE})
+
 logger = logging.getLogger(__name__)
 
 #: 各需渲染站台的行為差異。放設定而非程式分支，新增站台只需加一筆。
@@ -81,12 +86,21 @@ def dispatch_poll(source: Source):
     ``/livenews/ctee`` 實測純 HTTP 可過 Cloudflare，不必佔用
     browser 佇列。未列入 BROWSER_SOURCES 的 scrape 來源改走
     fetch + 以 slug 註冊的 adapter。
+
+    司法院不是清單輪詢：公開查詢介面沒有 feed，任務 33 已改走
+    月封存檔。按「立即爬取」應觸發官方源檢查，而不是再拿 HTML
+    去餵 RSS parser。
     """
     if source.slug in BROWSER_SOURCES:
         return browser_poll_source.delay(source.pk)
     if source.type == SourceType.NEWS_SCRAPE:
         return poll_source.delay(source.pk, adapter_slug=source.slug)
-    return poll_source.delay(source.pk)
+    if source.type == SourceType.NEWS_RSS:
+        return poll_source.delay(source.pk)
+    if source.type == SourceType.JUDICIAL_API:
+        from apps.events.tasks import check_official_records
+        return check_official_records.delay()
+    raise ValueError(f"來源型別 {source.type} 尚無輪詢路徑")
 
 
 @shared_task(
@@ -101,7 +115,7 @@ def poll_due_sources() -> dict:
     只做派發不做抓取，讓單一來源的失敗或緩慢不影響其他來源。
     """
     dispatched = []
-    for source in Source.objects.filter(enabled=True):
+    for source in Source.objects.filter(enabled=True, type__in=NEWS_POLL_TYPES):
         if not should_poll(source):
             continue
         dispatch_poll(source)

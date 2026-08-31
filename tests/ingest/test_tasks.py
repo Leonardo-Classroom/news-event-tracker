@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from apps.ingest.models import Source, SourceType
-from apps.ingest.tasks import dispatch_poll
+from apps.ingest.tasks import dispatch_poll, poll_due_sources
 
 
 @pytest.mark.medium
@@ -52,7 +52,19 @@ class TestDispatchPoll:
         mocked_poll.delay.assert_called_once_with(source.pk, adapter_slug="ctee")
         mocked_browser.delay.assert_not_called()
 
-    def test_司法院api型別走fetch佇列(self, official_source):
-        with patch("apps.ingest.tasks.poll_source") as mocked_poll:
+    def test_司法院來源走官方源檢查而非RSS(self, official_source):
+        """judgment.judicial.gov.tw 回的是查詢頁 HTML，當 RSS 解析
+        會得到 not well-formed，連續失敗計數只會一直往上加。"""
+        with patch("apps.ingest.tasks.poll_source") as mocked_poll, \
+             patch("apps.events.tasks.check_official_records") as mocked_check:
             dispatch_poll(official_source)
-        mocked_poll.delay.assert_called_once_with(official_source.pk)
+        mocked_poll.delay.assert_not_called()
+        mocked_check.delay.assert_called_once_with()
+
+    def test_定期輪詢略過司法院來源(self, official_source):
+        official_source.enabled = True
+        official_source.save()
+        with patch("apps.ingest.tasks.dispatch_poll") as mocked:
+            poll_due_sources()
+        slugs = [c.args[0].slug for c in mocked.call_args_list]
+        assert official_source.slug not in slugs
