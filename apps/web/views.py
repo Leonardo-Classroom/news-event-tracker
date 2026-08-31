@@ -32,7 +32,10 @@ from apps.events.models import (
 )
 from apps.review.service import ReviewError, approve, batch_approve, reject
 from apps.ingest.models import Document, ExternalSession, Source, SourceType
-from apps.ingest.services import FAILURE_THRESHOLD, effective_interval_minutes, should_poll
+from apps.ingest.services import (
+    FAILURE_THRESHOLD, effective_interval_minutes, mark_poll_started,
+    poll_in_progress, should_poll,
+)
 from apps.ingest.tasks import dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
 from apps.llm.models import LlmPurpose, LlmUsage
@@ -414,6 +417,7 @@ def crawlers(request):
             "effective_interval": effective_interval_minutes(source),
             "due_now": should_poll(source) if source.enabled else False,
             "unhealthy": source.consecutive_failures >= FAILURE_THRESHOLD,
+            "in_progress": poll_in_progress(source, now),
         })
 
     sessions = []
@@ -461,6 +465,7 @@ def crawler_run(request, slug):
     「最後成功時間」「連續失敗次數」自然反映出來。
     """
     source = get_object_or_404(Source, slug=slug)
+    mark_poll_started(source)
     try:
         dispatch_poll(source)
     except ValueError as exc:

@@ -36,6 +36,14 @@ class TestCrawlersView:
         assert mocked.call_args[0][0].pk == crawl_source.pk
         assert response.status_code == 302
 
+    def test_立即爬取後顯示進行中(self, admin_client, crawl_source):
+        with patch("apps.web.views.dispatch_poll"):
+            admin_client.post(f"/crawlers/{crawl_source.slug}/run/")
+        crawl_source.refresh_from_db()
+        assert crawl_source.last_attempt_at is not None
+        html = admin_client.get("/crawlers/").content.decode()
+        assert "進行中" in html
+
     def test_立即爬取要求POST(self, admin_client, crawl_source):
         """GET 不該觸發爬取——按鈕誤被爬蟲或預抓取（prefetch）點擊
         不該產生副作用。"""

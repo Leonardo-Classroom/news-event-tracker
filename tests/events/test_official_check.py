@@ -12,8 +12,9 @@ import pytest
 
 from apps.events.models import Event, EventStatus
 from apps.events.official_check import check_due_events
+from apps.events.tasks import run_official_check
 from apps.ingest.judicial_opendata import MonthlyArchive, SessionExpired
-from apps.ingest.models import ExternalSession
+from apps.ingest.models import ContentClass, ExternalSession, Source, SourceType
 
 UTC = dt.timezone.utc
 
@@ -161,3 +162,24 @@ class TestCheckDueEvents:
              patch("apps.events.official_check.find_case_in_archive", return_value=None):
             summary = check_due_events()
         assert summary.results == []
+
+
+@pytest.mark.medium
+class TestRunOfficialCheck:
+    def test_完成後爬蟲頁的司法來源標記成功(self, db):
+        source = Source.objects.create(
+            slug="judicial-search", name="司法院公開查詢介面",
+            type=SourceType.JUDICIAL_API,
+            base_url="https://judgment.judicial.gov.tw",
+            content_class=ContentClass.PUBLIC_RECORD,
+        )
+        summary = MagicMock(
+            session_expired=False, events_checked=0,
+            archives_downloaded=0, results=[],
+        )
+        with patch("apps.events.official_check.check_due_events", return_value=summary):
+            run_official_check()
+        source.refresh_from_db()
+        assert source.last_success_at is not None
+        assert source.consecutive_failures == 0
+        assert source.last_error == ""

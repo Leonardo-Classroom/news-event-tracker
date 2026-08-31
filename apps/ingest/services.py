@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from dataclasses import dataclass
 
@@ -22,6 +23,12 @@ logger = logging.getLogger(__name__)
 FAILURE_THRESHOLD = 5
 #: 降頻倍率
 BACKOFF_MULTIPLIER = 6
+
+#: 派工後、尚未寫入成功／失敗前，視為「進行中」。超過此時限仍沒
+#: 結果，多半是 worker 死了而不是還在跑——官方源下載 270MB 實測
+#: 1–2 分鐘，browser 任務 soft limit 10 分鐘，20 分鐘夠把正常執行
+#: 與卡死分開。
+IN_PROGRESS_STALE = dt.timedelta(minutes=20)
 
 
 @dataclass
@@ -138,6 +145,30 @@ def ingest_source(
 
     _record_success(source, now)
     return result
+
+
+def mark_poll_started(source: Source, clock: Clock | None = None) -> None:
+    """派工當下就寫 last_attempt_at，讓 UI 在 worker 接手前能顯示「進行中」。
+
+    成功／失敗紀錄在任務結束時覆寫；若只在結束時才動 last_attempt，
+    點「立即爬取」之後刷新仍會看到「從未成功」，像是沒開始。
+    """
+    source.last_attempt_at = (clock or SystemClock()).now()
+    source.save(update_fields=["last_attempt_at", "updated_at"])
+
+
+def poll_in_progress(source: Source, now: dt.datetime | None = None) -> bool:
+    """已派工、尚未成功或失敗、且未超過逾時。"""
+    if source.consecutive_failures:
+        return False
+    if source.last_attempt_at is None:
+        return False
+    now = now or timezone.now()
+    if now - source.last_attempt_at > IN_PROGRESS_STALE:
+        return False
+    if source.last_success_at is None:
+        return True
+    return source.last_attempt_at > source.last_success_at
 
 
 def _record_success(source: Source, now) -> None:

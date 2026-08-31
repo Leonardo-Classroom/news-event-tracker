@@ -13,8 +13,10 @@ from apps.ingest.models import Document, Source, SourceType
 from apps.ingest.services import (
     BACKOFF_MULTIPLIER,
     FAILURE_THRESHOLD,
+    IN_PROGRESS_STALE,
     effective_interval_minutes,
     ingest_source,
+    poll_in_progress,
     should_poll,
 )
 from tests.ingest.test_rss_adapter import RSS_SAMPLE
@@ -44,6 +46,30 @@ class TestEffectiveInterval:
         src = make_source(poll_interval_minutes=30,
                           consecutive_failures=FAILURE_THRESHOLD - 1)
         assert effective_interval_minutes(src) == 30
+
+
+class TestPollInProgress:
+    def test_剛派工且尚未成功視為進行中(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = make_source(last_attempt_at=now, last_success_at=None)
+        assert poll_in_progress(src, now) is True
+
+    def test_成功後不再顯示進行中(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = make_source(last_attempt_at=now, last_success_at=now)
+        assert poll_in_progress(src, now) is False
+
+    def test_失敗不顯示進行中(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = make_source(last_attempt_at=now, last_success_at=None,
+                          consecutive_failures=1)
+        assert poll_in_progress(src, now) is False
+
+    def test_逾時視為不是進行中(self):
+        now = dt.datetime(2026, 8, 31, 12, tzinfo=UTC)
+        src = make_source(last_attempt_at=now - IN_PROGRESS_STALE - dt.timedelta(minutes=1),
+                          last_success_at=None)
+        assert poll_in_progress(src, now) is False
 
 
 class TestShouldPoll:

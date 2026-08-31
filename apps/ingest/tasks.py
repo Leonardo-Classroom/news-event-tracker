@@ -19,7 +19,7 @@ from celery import shared_task
 
 from apps.ingest.browser import RenderOptions
 from apps.ingest.models import Source, SourceType
-from apps.ingest.services import ingest_source, should_poll
+from apps.ingest.services import ingest_source, mark_poll_started, should_poll
 
 #: 清單輪詢只適用於新聞來源。司法院公開查詢介面不是 feed，
 #: 拿 HTML 當 RSS 解析會得到「not well-formed」然後連續失敗——
@@ -63,8 +63,8 @@ def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
     """
     source = Source.objects.get(pk=source_id)
     if source.type == SourceType.JUDICIAL_API:
-        from apps.events.tasks import check_official_records
-        return check_official_records()
+        from apps.events.tasks import run_official_check
+        return run_official_check()
     result = ingest_source(source, adapter_slug=adapter_slug)
     logger.info(
         "來源 %s：取得 %d、新增 %d、更新 %d、略過 %d%s",
@@ -126,6 +126,7 @@ def poll_due_sources() -> dict:
     for source in Source.objects.filter(enabled=True, type__in=NEWS_POLL_TYPES):
         if not should_poll(source):
             continue
+        mark_poll_started(source)
         dispatch_poll(source)
         dispatched.append(source.slug)
     logger.info("派發 %d 個到期來源：%s", len(dispatched), ", ".join(dispatched) or "無")
