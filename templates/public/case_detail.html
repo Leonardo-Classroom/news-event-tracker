@@ -63,29 +63,16 @@
   {% endfor %}
   {% endif %}
 
-  {% if sources %}
-  <h2 class="section-title">報導與官方紀錄<span class="count">{{ sources|length }}</span></h2>
-  <p class="section-note">以下為已歸入本案的來源標題與原文連結，不是新聞全文，也還不是系統自製的事實時間線。</p>
-  {% for item in sources %}
-    {% if item.gap %}
-      <div class="source-gap">⋯ {{ item.gap }} 天無新來源</div>
-    {% endif %}
-    <div class="timeline-item">
-      <div class="date">{{ item.doc.published_at|date:"Y-m-d"|default:"日期不明" }}</div>
-      <div class="body">
-        <div class="fact">
-          <a href="{{ item.doc.url }}" target="_blank" rel="noopener nofollow">{{ item.doc.title }}</a>
-        </div>
-        <div class="source-link">
-          {{ item.doc.source }}
-          {% if item.doc.body %} · <span class="tag active">官方紀錄</span>{% endif %}
-        </div>
-        {% if item.doc.body %}
-          <div class="official-body">{{ item.doc.body }}</div>
-        {% endif %}
-      </div>
-    </div>
-  {% endfor %}
+  {% if source_total %}
+  <h2 class="section-title">報導與官方紀錄<span class="count">{{ source_total }}</span></h2>
+  <p class="section-note">以下為已歸入本案的來源標題與原文連結，不是新聞全文，也還不是系統自製的事實時間線。官方全文預設折疊。</p>
+  {% include "public/_source_items.html" with items=sources_head %}
+  {% if sources_tail %}
+  <details class="fold">
+    <summary>展開其餘 {{ sources_tail|length }} 則</summary>
+    {% include "public/_source_items.html" with items=sources_tail %}
+  </details>
+  {% endif %}
   {% endif %}
 
   <div class="footer-note">

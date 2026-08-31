@@ -25,6 +25,10 @@ from apps.timeline.models import CausalEdge, TimelineNode
 #: 「新聞停了」本身就是這個產品要給讀者看的資訊。
 GAP_HIGHLIGHT_DAYS = 45
 
+#: 來源清單預設展開的則數。京華城案 373 則全展開會把首屏
+#: 進度與識別特徵全部頂出視窗。
+SOURCE_PREVIEW = 20
+
 
 def case_list(request):
     """公開事件列表（首頁）。類似新聞網站的案件專題列表頁。"""
@@ -82,7 +86,9 @@ def case_detail(request, slug):
 
     return render(request, "public/case_detail.html", {
         "event": event, "timeline": timeline, "causal_edges": edges,
-        "sources": sources,
+        "sources_head": sources[:SOURCE_PREVIEW],
+        "sources_tail": sources[SOURCE_PREVIEW:],
+        "source_total": len(sources),
         "ld_json": _safe_json_ld(_schema_org_article(event)),
     })
 

@@ -1,0 +1,23 @@
+{% for item in items %}
+  {% if item.gap %}
+    <div class="source-gap">⋯ {{ item.gap }} 天無新來源</div>
+  {% endif %}
+  <div class="timeline-item">
+    <div class="date">{{ item.doc.published_at|date:"Y-m-d"|default:"日期不明" }}</div>
+    <div class="body">
+      <div class="fact">
+        <a href="{{ item.doc.url }}" target="_blank" rel="noopener nofollow">{{ item.doc.title }}</a>
+      </div>
+      <div class="source-link">
+        {{ item.doc.source }}
+        {% if item.doc.body %} · <span class="tag active">官方紀錄</span>{% endif %}
+      </div>
+      {% if item.doc.body %}
+      <details class="fold official-fold">
+        <summary>展開官方全文（{{ item.doc.body|length }} 字）</summary>
+        <div class="official-body">{{ item.doc.body }}</div>
+      </details>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}

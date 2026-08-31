@@ -100,6 +100,7 @@ class TestCaseDetail:
         assert news_doc.source.name in html
         assert news_doc.raw_body[:50] not in html
         assert "報導與官方紀錄" in html
+        assert "展開其餘" not in html
 
     def test_來源清單中公文可顯示全文(self, published_event, official_source):
         from apps.events.models import AssignmentMethod, EventDocument
@@ -115,6 +116,27 @@ class TestCaseDetail:
             method=AssignmentMethod.MANUAL)
         html = client_get(f"/case/{published_event.slug}/").content.decode()
         assert "主文：被告經判決無罪。" in html
+        assert "展開官方全文" in html
+        assert "<details open" not in html
+
+    def test_來源超過預覽則數時其餘折疊(self, published_event, source):
+        from apps.events.models import AssignmentMethod, EventDocument
+        from apps.ingest.models import Document
+        from apps.public.views import SOURCE_PREVIEW
+
+        for i in range(SOURCE_PREVIEW + 3):
+            doc = Document.objects.create(
+                source=source, url=f"https://news.test/fold-{i}",
+                title=f"來源{i}", raw_body="內文" * 20,
+                content_class=ContentClass.COPYRIGHTED,
+            )
+            EventDocument.objects.create(
+                event=published_event, document=doc,
+                method=AssignmentMethod.MANUAL)
+        html = client_get(f"/case/{published_event.slug}/").content.decode()
+        assert f"展開其餘 3 則" in html
+        assert "來源0" in html
+        assert f"來源{SOURCE_PREVIEW + 2}" in html
 
     def test_新聞全文永不外洩(self, published_event, news_doc):
         """規格 M7、G7，release blocker：公開端點回應絕不含新聞全文。"""
