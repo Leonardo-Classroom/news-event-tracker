@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from apps.ingest.models import Source, SourceType
-from apps.ingest.tasks import dispatch_poll, poll_due_sources
+from apps.ingest.tasks import dispatch_poll, poll_due_sources, poll_source
 
 
 @pytest.mark.medium
@@ -60,6 +60,15 @@ class TestDispatchPoll:
             dispatch_poll(official_source)
         mocked_poll.delay.assert_not_called()
         mocked_check.delay.assert_called_once_with()
+
+    def test_poll_source收到司法院來源也不走RSS(self, official_source):
+        """舊 Beat 仍可能把司法來源丟進 poll_source（預設 rss）。"""
+        with patch("apps.ingest.tasks.ingest_source") as ingest, \
+             patch("apps.events.tasks.check_official_records",
+                   return_value={"session_expired": False}) as check:
+            poll_source(official_source.pk)
+        ingest.assert_not_called()
+        check.assert_called_once_with()
 
     def test_定期輪詢略過司法院來源(self, official_source):
         official_source.enabled = True

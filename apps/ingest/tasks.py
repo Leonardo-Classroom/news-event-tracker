@@ -55,8 +55,16 @@ BROWSER_SOURCES: dict[str, tuple[str, str, RenderOptions]] = {
     retry_kwargs={"max_retries": 3},
 )
 def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
-    """抓取單一來源。冪等——重跑只會 upsert 既有文件。"""
+    """抓取單一來源。冪等——重跑只會 upsert 既有文件。
+
+    Beat／舊 worker 若仍把司法院來源丟進這條任務（預設 rss adapter），
+    會去抓 judgment.judicial.gov.tw 的 HTML 當 feed，寫下
+    「not well-formed」。這裡擋住，改走月封存檔檢查。
+    """
     source = Source.objects.get(pk=source_id)
+    if source.type == SourceType.JUDICIAL_API:
+        from apps.events.tasks import check_official_records
+        return check_official_records()
     result = ingest_source(source, adapter_slug=adapter_slug)
     logger.info(
         "來源 %s：取得 %d、新增 %d、更新 %d、略過 %d%s",
