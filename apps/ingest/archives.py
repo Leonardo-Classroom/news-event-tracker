@@ -28,7 +28,12 @@
   （約 5 天）、自由第 26–29 頁即見底（約 1.5 天）、公視約
   100–200 頁見底（約 1 個月）。走完不等於拿到該站全部歷史。
 - **工商的 ``?page=N`` 根本不生效**：page=1/50/200/400 回傳完全
-  相同的 35 篇。分頁是裝飾用的，實際只有一頁。
+  相同的 35 篇。分頁是裝飾用的，實際只有一頁。改走
+  ``sitemaps/sitemap_newstoday.xml``（1000 篇、含標題與時間、
+  純 HTTP）。**更早的內容站台不給**：「載入更多」打的
+  ``/api/category/{分類}/{頁}`` 與 robots.txt 列出的 104 個歷史
+  子 sitemap 都被 Cloudflare 擋成 403；該 API 即使在真實瀏覽器裡
+  也只容許同一 session 前 1–3 次呼叫，之後一律 403。
 - **公視的 2011-08-02 是最早的文章 ID，不是清單能翻到的最早**，
   當成 ``earliest`` 會在 UI 顯示一個實際到不了的日期。
 - **鏡週刊可以爬，而且能挖到底**：站台的無限捲動實際上是打
@@ -178,12 +183,13 @@ ARCHIVE_SPECS: dict[str, ArchiveSpec] = {
     ),
     "ctee": _spec(
         slug="ctee", kind=KIND_PAGE,
-        url_template="https://www.ctee.com.tw/livenews/ctee?page={page}",
-        earliest=None,
-        adapter_slug="ctee", chunk_size=10, max_units=1,
-        note="分類頁 ?page=N 純 HTTP，但 2026-09-01 實測 page 參數"
-             "根本不生效（page=1/50/200/400 回傳完全相同的 35 篇），"
-             "等於只有一頁近況。帶日期的路徑被 Cloudflare 擋",
+        url_template="https://www.ctee.com.tw/sitemaps/sitemap_newstoday.xml",
+        earliest=None, list_parser=PARSER_SITEMAP,
+        chunk_size=1, max_units=1,
+        note="Google News sitemap 1000 篇（含標題與發布時間），約近 2 天，"
+             "純 HTTP 可取；清單頁只有 35 篇且 ?page=N 不生效。"
+             "更早的內容站台不給：104 個歷史子 sitemap 與「載入更多」的"
+             "/api/category/ 都被 Cloudflare 擋（403）",
     ),
     "pts": _spec(
         slug="pts", kind=KIND_PAGE,
@@ -485,15 +491,24 @@ def parse_sitemap_xml(raw: str, *, base_url: str = "") -> list[ParsedDocument]:
         url = normalize_url(loc.group(1).strip(), base_url)
         if not url:
             continue
-        lastmod = re.search(r"<lastmod>\s*(.*?)\s*</lastmod>", block, re.DOTALL)
+        # Google News sitemap（工商）另有 news:title 與 news:publication_date，
+        # 比一般 sitemap 的 lastmod 精確，且直接給了標題。
+        title = _first_tag(block, "news:title")
+        when = (_first_tag(block, "news:publication_date")
+                or _first_tag(block, "lastmod"))
         docs.append(ParsedDocument(
             url=url,
-            # 標題留白：sitemap 沒有標題，硬塞網址片段會污染後續的
+            # 沒有 news:title 時留白，交給內頁補齊——硬塞網址片段會污染
             # 轉載歸併與檢索（標題是 bigram 指紋的一部分）。
-            title="",
-            published_at=parse_datetime(lastmod.group(1)) if lastmod else None,
+            title=title,
+            published_at=parse_datetime(when) if when else None,
         ))
     return docs
+
+
+def _first_tag(block: str, tag: str) -> str:
+    match = re.search(rf"<{tag}>\s*(.*?)\s*</{tag}>", block, re.DOTALL)
+    return match.group(1).strip() if match else ""
 
 
 def _parse_slash_datetime(raw) -> dt.datetime | None:

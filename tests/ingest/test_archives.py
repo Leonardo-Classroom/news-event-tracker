@@ -45,10 +45,36 @@ def test_sitemap抽出網址與時間():
 
 
 def test_sitemap沒有標題不亂填():
-    """sitemap 只有網址，標題要留白給內頁補齊——硬塞網址片段會污染
-    轉載歸併的 bigram 指紋與檢索。"""
+    """一般 sitemap 只有網址，標題要留白給內頁補齊——硬塞網址片段會
+    污染轉載歸併的 bigram 指紋與檢索。"""
     docs = parse_sitemap_xml(SITEMAP_SAMPLE, base_url="https://www.mirrormedia.mg")
     assert all(d.title == "" for d in docs)
+
+
+NEWS_SITEMAP_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+<url><loc>https://www.ctee.com.tw/news/20260901702286-430701</loc>
+<news:news><news:publication><news:name>工商時報</news:name></news:publication>
+<news:publication_date>2026-09-01T10:09:06+08:00</news:publication_date>
+<news:title>美國7月職缺數量低於預期</news:title>
+</news:news></url></urlset>"""
+
+
+def test_google_news_sitemap取得標題與發布時間():
+    """工商的 sitemap 是 Google News 格式，有 news:title 與
+    news:publication_date——比 lastmod 精確，而且直接給了標題。"""
+    docs = parse_sitemap_xml(NEWS_SITEMAP_SAMPLE, base_url="https://www.ctee.com.tw")
+    assert len(docs) == 1
+    assert docs[0].title == "美國7月職缺數量低於預期"
+    assert docs[0].published_at.hour == 10
+
+
+def test_工商改走news_sitemap():
+    """清單頁只有 35 篇且 ?page=N 不生效；sitemap 有 1000 篇。"""
+    spec = get_archive_spec("ctee")
+    assert spec.url_template.endswith("sitemap_newstoday.xml")
+    assert spec.list_parser == "sitemap"
 
 
 def test_中央社POST帶分類與頁碼():
