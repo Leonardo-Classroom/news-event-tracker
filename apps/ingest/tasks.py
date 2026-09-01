@@ -17,6 +17,7 @@ import logging
 
 from celery import shared_task
 
+from apps.ingest.archives import get_archive_spec
 from apps.ingest.browser import RenderOptions
 from apps.ingest.models import Source, SourceType
 from apps.ingest.services import ingest_source, mark_poll_started, should_poll
@@ -60,12 +61,25 @@ def poll_source(source_id: int, adapter_slug: str = "rss") -> dict:
     Beat／舊 worker 若仍把司法院來源丟進這條任務（預設 rss adapter），
     會去抓 judgment.judicial.gov.tw 的 HTML 當 feed，寫下
     「not well-formed」。這裡擋住，改走月封存檔檢查。
+
+    有 ``ArchiveSpec`` 的來源一律走該規格抓「最新」（見
+    ``services.ingest_source`` 的 ``archive_spec`` 分支），不論
+    ``adapter_slug`` 傳了什麼——歷史回補與即時輪詢因此共用同一份
+    URL／解析邏輯，不會漂移成兩份。沒有 spec 的來源（例如尚未
+    改走爬蟲的 RSS 來源）才落回舊的 adapter_slug 路徑。
     """
     source = Source.objects.get(pk=source_id)
     if source.type == SourceType.JUDICIAL_API:
         from apps.events.tasks import run_official_check
         return run_official_check(force=True)
-    result = ingest_source(source, adapter_slug=adapter_slug)
+    spec = get_archive_spec(source.slug)
+    # 鏡週刊在 ARCHIVE_SPECS 裡也有一筆，但 url_template 是空的
+    # （目前沒有可用路徑，仍只能靠 RSS）——沒有真正路徑的 spec
+    # 不能拿來走即時輪詢，否則會送出一個空網址的請求。
+    if spec is not None and spec.url_template:
+        result = ingest_source(source, archive_spec=spec)
+    else:
+        result = ingest_source(source, adapter_slug=adapter_slug)
     logger.info(
         "來源 %s：取得 %d、新增 %d、更新 %d、略過 %d%s",
         result.source_slug, result.fetched, result.created,

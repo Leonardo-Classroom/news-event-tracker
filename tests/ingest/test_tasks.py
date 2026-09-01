@@ -70,6 +70,45 @@ class TestDispatchPoll:
         ingest.assert_not_called()
         check.assert_called_once_with(force=True)
 
+    def test_有archive_spec的來源走spec而非adapter_slug(self, db):
+        """任務 61 之後，即時輪詢改沿用歷史回補的 ArchiveSpec 抓最新，
+        不再靠 RSS——即使呼叫端仍傳了 adapter_slug（dispatch_poll
+        對 NEWS_SCRAPE 來源固定會傳），有 spec 的來源要以 spec 為準。
+        """
+        source = Source.objects.create(
+            slug="ltn", name="自由時報", type=SourceType.NEWS_SCRAPE,
+            base_url="https://news.ltn.com.tw",
+        )
+        with patch("apps.ingest.tasks.ingest_source") as mocked_ingest:
+            mocked_ingest.return_value.source_slug = "ltn"
+            mocked_ingest.return_value.fetched = 0
+            mocked_ingest.return_value.created = 0
+            mocked_ingest.return_value.updated = 0
+            mocked_ingest.return_value.error = ""
+            poll_source(source.pk, adapter_slug="rss")
+        _, kwargs = mocked_ingest.call_args
+        assert kwargs.get("archive_spec") is not None
+        assert "adapter_slug" not in kwargs
+
+    def test_鏡週刊沒有可用路徑仍走adapter_slug(self, db):
+        """鏡週刊在 ARCHIVE_SPECS 裡也有一筆，但 url_template 是空的
+        （SPA，目前無可用路徑）——不能被誤判成「有 spec 可用」。"""
+        source = Source.objects.create(
+            slug="mirrormedia", name="鏡週刊", type=SourceType.NEWS_RSS,
+            base_url="https://www.mirrormedia.mg",
+            feed_url="https://www.mirrormedia.mg/rss/news.xml",
+        )
+        with patch("apps.ingest.tasks.ingest_source") as mocked_ingest:
+            mocked_ingest.return_value.source_slug = "mirrormedia"
+            mocked_ingest.return_value.fetched = 0
+            mocked_ingest.return_value.created = 0
+            mocked_ingest.return_value.updated = 0
+            mocked_ingest.return_value.error = ""
+            poll_source(source.pk)
+        _, kwargs = mocked_ingest.call_args
+        assert kwargs.get("archive_spec") is None
+        assert kwargs.get("adapter_slug") == "rss"
+
     def test_定期輪詢略過司法院來源(self, official_source):
         official_source.enabled = True
         official_source.save()

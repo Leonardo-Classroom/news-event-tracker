@@ -36,6 +36,7 @@ from urllib.parse import urlencode
 from apps.core.dates import parse_datetime
 from apps.ingest.adapters.base import ParsedDocument
 from apps.ingest.adapters.rss import normalize_url
+from apps.ingest.fetchers import FetchError, Fetcher
 
 TAIPEI = dt.timezone(dt.timedelta(hours=8))
 
@@ -224,6 +225,20 @@ def initial_cursor(spec: ArchiveSpec) -> Cursor:
     return Cursor(page=1)
 
 
+def live_cursor(spec: ArchiveSpec, today: dt.date) -> Cursor:
+    """即時輪詢要的是「最新」，不是「最舊」。
+
+    ``initial_cursor`` 給歷史回補的起點（日期走訪從 ``earliest``
+    開始），即時輪詢反過來要當天／第一頁／offset 0——同一份
+    ``ArchiveSpec`` 兩種呼叫端各自要不同的起點，不能共用。
+    """
+    if spec.kind == KIND_DATE:
+        return Cursor(date=today)
+    if spec.kind == KIND_OFFSET:
+        return Cursor(offset=0)
+    return Cursor(page=1)
+
+
 def build_request(spec: ArchiveSpec, cursor: Cursor) -> ArchiveRequest:
     if spec.kind == KIND_DATE:
         if cursor.date is None:
@@ -244,6 +259,18 @@ def build_request(spec: ArchiveSpec, cursor: Cursor) -> ArchiveRequest:
         }
         return ArchiveRequest(url=url, body=body)
     return ArchiveRequest(url=url)
+
+
+def fetch_archive_page(fetcher: Fetcher, spec: ArchiveSpec, request: ArchiveRequest) -> str:
+    """依規格的 method 送出請求。歷史回補與即時輪詢共用同一份，
+    避免 GET/POST 分支各寫一份後彼此漂移。"""
+    if spec.method == "POST" and hasattr(fetcher, "post"):
+        response = fetcher.post(request.url, json=request.body)
+    else:
+        response = fetcher.get(request.url)
+    if not response.ok:
+        raise FetchError(f"HTTP {response.status_code}")
+    return response.text
 
 
 def advance_cursor(spec: ArchiveSpec, cursor: Cursor) -> Cursor:

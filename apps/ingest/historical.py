@@ -15,8 +15,9 @@ from django.utils import timezone
 from apps.core.clock import Clock, SystemClock
 from apps.ingest.archives import (
     KIND_DATE, KIND_OFFSET, KIND_PAGE, TAIPEI, ArchiveSpec, Cursor,
-    advance_cursor, apply_archive_date, build_request, fingerprint_urls,
-    get_archive_spec, initial_cursor, parse_archive_documents,
+    advance_cursor, apply_archive_date, build_request, fetch_archive_page,
+    fingerprint_urls, get_archive_spec, initial_cursor,
+    parse_archive_documents,
 )
 from apps.ingest.fetchers import FetchError, Fetcher, HttpFetcher
 from apps.ingest.models import Document, Source
@@ -125,16 +126,6 @@ def _save_cursor(source: Source, cursor: Cursor, now: dt.datetime) -> None:
     ])
 
 
-def _fetch_raw(fetcher: Fetcher, spec: ArchiveSpec, request) -> str:
-    if spec.method == "POST" and hasattr(fetcher, "post"):
-        response = fetcher.post(request.url, json=request.body)
-    else:
-        response = fetcher.get(request.url)
-    if not response.ok:
-        raise FetchError(f"HTTP {response.status_code}")
-    return response.text
-
-
 def ingest_archive_chunk(
     source: Source,
     *,
@@ -175,7 +166,7 @@ def ingest_archive_chunk(
 
             request = build_request(spec, cursor)
             try:
-                raw = _fetch_raw(fetcher, spec, request)
+                raw = fetch_archive_page(fetcher, spec, request)
                 docs = parse_archive_documents(
                     spec, raw, base_url=source.base_url)
             except FetchError as exc:

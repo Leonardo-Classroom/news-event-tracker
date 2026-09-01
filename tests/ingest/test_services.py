@@ -4,10 +4,12 @@
 以 small 測試涵蓋；實際寫入需要真實 PostgreSQL，屬 medium。
 """
 import datetime as dt
+import json
 
 import pytest
 
 from apps.core.clock import FixedClock
+from apps.ingest.archives import get_archive_spec, tagged_post_url
 from apps.ingest.fetchers import FakeFetcher
 from apps.ingest.models import Document, Source, SourceType
 from apps.ingest.services import (
@@ -209,6 +211,62 @@ class TestIngestSource:
         doc = Document.objects.get(url="https://example.test/news/nodate")
         assert doc.published_at == kept
         assert doc.title == "新標題"
+
+
+@pytest.mark.medium
+class TestIngestSourceArchiveSpec:
+    """有 ``ArchiveSpec`` 的來源：即時輪詢與歷史回補共用同一份規格，
+    但即時輪詢要抓「最新」（見 ``live_cursor``），不是歷史回補的
+    起點。這裡驗證即時路徑真的算出最新頁／今天，而不是不小心
+    沿用了 ``initial_cursor`` 的最舊起點。"""
+
+    def test_page走訪抓第一頁而非最舊(self, source):
+        spec = get_archive_spec("cna-society")
+        body = json.dumps({"ResultData": {"Items": [
+            {"PageUrl": "/news/asoc/202608310001.aspx", "HeadLine": "測試新聞",
+             "CreateTime": "2026/08/31 12:00:00", "Id": "202608310001"},
+        ]}})
+        url = tagged_post_url(spec.url_template, {
+            "action": "0", "category": "asoc", "pageidx": 1,
+            "pagesize": spec.pagesize,
+        })
+        fetcher = FakeFetcher()
+        fetcher.register(url, body)
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=UTC))
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok and result.created == 1
+        assert Document.objects.get().title == "測試新聞"
+
+    def test_date走訪抓今天而非站台最早日期(self, source):
+        spec = get_archive_spec("ettoday")
+        # UTC 03:00 = 台北 11:00，同一天——若誤用 UTC 日期會在
+        # 台北午夜前後跨日算錯。
+        clock = FixedClock(dt.datetime(2026, 8, 31, 3, tzinfo=UTC))
+        url = "https://www.ettoday.net/news/news-list-2026-08-31-0.htm"
+        html = ('<div class="part_list_2"><h3>'
+                '<a href="https://www.ettoday.net/news/123456.htm">測試</a>'
+                '</h3></div>')
+        fetcher = FakeFetcher({url: html})
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok
+        assert fetcher.calls == [url]      # 不是 spec.earliest 的 2012 年
+
+    def test_失敗仍記為來源失敗(self, source):
+        spec = get_archive_spec("ltn")
+        result = ingest_source(
+            source, fetcher=FakeFetcher(),
+            clock=FixedClock(dt.datetime(2026, 8, 31, tzinfo=UTC)),
+            archive_spec=spec)
+
+        assert not result.ok
+        source.refresh_from_db()
+        assert source.consecutive_failures == 1
 
 
 @pytest.mark.medium

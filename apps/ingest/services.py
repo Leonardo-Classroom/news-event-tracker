@@ -14,6 +14,10 @@ from django.utils import timezone
 
 from apps.core.clock import Clock, SystemClock
 from apps.ingest.adapters import get_adapter
+from apps.ingest.archives import (
+    TAIPEI, ArchiveSpec, build_request, fetch_archive_page, live_cursor,
+    parse_archive_documents,
+)
 from apps.ingest.fetchers import FetchError, Fetcher, HttpFetcher
 from apps.ingest.models import Document, Source
 
@@ -93,26 +97,38 @@ def ingest_source(
     clock: Clock | None = None,
     adapter_slug: str = "rss",
     render_options=None,
+    archive_spec: ArchiveSpec | None = None,
 ) -> IngestResult:
     """抓取單一來源並冪等地寫入文件。
 
     冪等性是硬性要求：ADR-0007 的 ``acks_late=True`` 表示被硬殺的任務
     會重新入列並重跑，因此本函式必須可以安全地重複執行。
+
+    ``archive_spec`` 給有 ``apps.ingest.archives.ArchiveSpec`` 的來源
+    （原本只用於歷史回補）：即時輪詢改抓「最新」而非「最舊」
+    （見 ``live_cursor``），沿用同一份 URL／POST body／解析邏輯，
+    不必為即時路徑另外維護一份 RSS 以外的請求組法。
     """
     clock = clock or SystemClock()
     fetcher = fetcher or HttpFetcher()
     result = IngestResult(source_slug=source.slug)
     now = clock.now()
 
-    url = source.feed_url or source.base_url
-
     try:
-        response = _fetch(fetcher, url, render_options)
-        if not response.ok:
-            raise FetchError(f"HTTP {response.status_code}")
-        parsed = get_adapter(adapter_slug).list_documents(
-            response.text, base_url=source.base_url
-        )
+        if archive_spec is not None:
+            cursor = live_cursor(archive_spec, now.astimezone(TAIPEI).date())
+            request = build_request(archive_spec, cursor)
+            raw = fetch_archive_page(fetcher, archive_spec, request)
+            parsed = parse_archive_documents(
+                archive_spec, raw, base_url=source.base_url)
+        else:
+            url = source.feed_url or source.base_url
+            response = _fetch(fetcher, url, render_options)
+            if not response.ok:
+                raise FetchError(f"HTTP {response.status_code}")
+            parsed = get_adapter(adapter_slug).list_documents(
+                response.text, base_url=source.base_url
+            )
     except (FetchError, ValueError, KeyError) as exc:
         _record_failure(source, now, str(exc))
         result.error = str(exc)
