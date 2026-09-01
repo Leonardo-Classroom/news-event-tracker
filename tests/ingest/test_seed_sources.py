@@ -29,7 +29,10 @@ class TestSeedSources:
         assert source.type == SourceType.NEWS_SCRAPE
         assert source.feed_url == ""
 
-    def test_鏡週刊仍走rss(self, db):
-        """目前唯一沒有可用爬蟲路徑的來源（SPA，API 逾時）。"""
+    def test_鏡週刊改走sitemap(self, db):
+        """曾被判定為「無可用路徑」（SPA，/api/v2/posts 逾時），
+        2026-09-01 實測 sitemap 純 HTTP 可取且比 RSS 多兩個數量級。"""
         call_command("seed_sources")
-        assert Source.objects.get(slug="mirrormedia").type == SourceType.NEWS_RSS
+        source = Source.objects.get(slug="mirrormedia")
+        assert source.type == SourceType.NEWS_SCRAPE
+        assert source.feed_url == ""

@@ -6,7 +6,7 @@ from apps.ingest.archives import (
     TAIPEI, Cursor, advance_cursor, apply_archive_date,
     build_request, fingerprint_urls, get_archive_spec, initial_cursor,
     parse_archive_documents, parse_cna_json, parse_ltn_json,
-    parse_twreporter_json, tagged_post_url,
+    parse_sitemap_xml, parse_twreporter_json, tagged_post_url,
 )
 from apps.ingest.adapters import get_adapter
 from apps.ingest.adapters.base import ParsedDocument
@@ -24,6 +24,38 @@ def test_ETtoday日清單網址含連字號日期():
     spec = get_archive_spec("ettoday")
     cursor = Cursor(date=dt.date(2012, 1, 1))
     assert "news-list-2012-01-01-0.htm" in build_request(spec, cursor).url
+
+
+SITEMAP_SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.mirrormedia.mg/story/20260901edi005</loc>
+    <lastmod>2026-09-01T11:13:36+08:00</lastmod></url>
+  <url><loc>https://www.mirrormedia.mg/story/20260822-194ent-021411</loc>
+    <lastmod>2026-08-22T09:00:00+08:00</lastmod></url>
+  <url><lastmod>2026-08-01T00:00:00+08:00</lastmod></url>
+</urlset>"""
+
+
+def test_sitemap抽出網址與時間():
+    docs = parse_sitemap_xml(SITEMAP_SAMPLE, base_url="https://www.mirrormedia.mg")
+    assert len(docs) == 2          # 沒有 <loc> 的那筆要被跳過
+    assert docs[0].url == "https://www.mirrormedia.mg/story/20260901edi005"
+    assert docs[0].published_at is not None
+
+
+def test_sitemap沒有標題不亂填():
+    """sitemap 只有網址，標題要留白給內頁補齊——硬塞網址片段會污染
+    轉載歸併的 bigram 指紋與檢索。"""
+    docs = parse_sitemap_xml(SITEMAP_SAMPLE, base_url="https://www.mirrormedia.mg")
+    assert all(d.title == "" for d in docs)
+
+
+def test_鏡週刊改走sitemap不再是空路徑():
+    spec = get_archive_spec("mirrormedia")
+    assert spec.url_template.endswith("/rss/posts.xml")
+    assert spec.list_parser == "sitemap"
+    req = build_request(spec, Cursor(page=1))
+    assert req.url == "https://www.mirrormedia.mg/rss/posts.xml"
 
 
 def test_中央社POST帶分類與頁碼():
@@ -163,8 +195,10 @@ def test_HTML空頁在歷史路徑回空清單而非拋錯():
     assert docs == []
 
 
-def test_鏡週刊沒有可用歷史URL():
+def test_鏡週刊sitemap只有一頁不翻頁():
+    """2026-09-01 起改走 sitemap（原本判定為「無可用路徑」）。
+    sitemap 沒有分頁參數，max_units=1 讓走訪抓完就停。"""
     spec = get_archive_spec("mirrormedia")
     assert spec is not None
-    assert spec.url_template == ""
-    assert spec.max_units == 0
+    assert spec.url_template
+    assert spec.max_units == 1

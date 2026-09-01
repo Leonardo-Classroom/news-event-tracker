@@ -90,21 +90,29 @@ class TestDispatchPoll:
         assert kwargs.get("archive_spec") is not None
         assert "adapter_slug" not in kwargs
 
-    def test_鏡週刊沒有可用路徑仍走adapter_slug(self, db):
-        """鏡週刊在 ARCHIVE_SPECS 裡也有一筆，但 url_template 是空的
-        （SPA，目前無可用路徑）——不能被誤判成「有 spec 可用」。"""
+    def test_沒有可用路徑的spec不當成可用(self, db):
+        """spec 存在但 url_template 是空的（尚未找到可爬路徑），
+        不能被誤判成「有 spec 可用」而送出空網址的請求。"""
+        from apps.ingest.archives import ARCHIVE_SPECS, _spec
+
         source = Source.objects.create(
-            slug="mirrormedia", name="鏡週刊", type=SourceType.NEWS_RSS,
-            base_url="https://www.mirrormedia.mg",
-            feed_url="https://www.mirrormedia.mg/rss/news.xml",
+            slug="placeholder-source", name="佔位來源",
+            type=SourceType.NEWS_RSS, base_url="https://example.test",
+            feed_url="https://example.test/rss.xml",
         )
-        with patch("apps.ingest.tasks.ingest_source") as mocked_ingest:
-            mocked_ingest.return_value.source_slug = "mirrormedia"
-            mocked_ingest.return_value.fetched = 0
-            mocked_ingest.return_value.created = 0
-            mocked_ingest.return_value.updated = 0
-            mocked_ingest.return_value.error = ""
-            poll_source(source.pk)
+        ARCHIVE_SPECS["placeholder-source"] = _spec(
+            slug="placeholder-source", kind="page", url_template="",
+            note="尚未找到可用路徑", max_units=0)
+        try:
+            with patch("apps.ingest.tasks.ingest_source") as mocked_ingest:
+                mocked_ingest.return_value.source_slug = "placeholder-source"
+                mocked_ingest.return_value.fetched = 0
+                mocked_ingest.return_value.created = 0
+                mocked_ingest.return_value.updated = 0
+                mocked_ingest.return_value.error = ""
+                poll_source(source.pk)
+        finally:
+            del ARCHIVE_SPECS["placeholder-source"]
         _, kwargs = mocked_ingest.call_args
         assert kwargs.get("archive_spec") is None
         assert kwargs.get("adapter_slug") == "rss"

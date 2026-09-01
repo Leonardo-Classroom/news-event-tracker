@@ -22,11 +22,10 @@ from apps.ingest.models import ContentClass, Source, SourceType
 # ``archive_spec`` 分支），不再靠 RSS。逐一以 HttpFetcher 對真實站台
 # 驗證過（pts/ettoday/ltn/twreporter/cna×4 皆 200 且能正確解析）。
 #
-# 鏡週刊目前仍無可用路徑（SPA，/api/v2/posts 逾時），繼續留在 RSS。
-RSS_SOURCES = [
-    ("mirrormedia", "鏡週刊",
-     "https://www.mirrormedia.mg/rss/news.xml", "https://www.mirrormedia.mg", 60),
-]
+# 2026-09-01 起連鏡週刊也不用 RSS 了（改走 sitemap，見下方
+# ARCHIVE_SPEC_SOURCES），這裡暫時沒有純 RSS 的來源；保留清單與流程
+# 是因為將來新增來源時未必每家都有可爬的清單頁。
+RSS_SOURCES: list[tuple[str, str, str, str, int]] = []
 
 # 無 RSS，需 Playwright（Scope 1 任務 9）。先建立來源記錄但預設停用，
 # 待 browser adapter 完成後啟用。
@@ -55,6 +54,8 @@ ARCHIVE_SPEC_SOURCES = [
     ("ettoday", "ETtoday", "https://www.ettoday.net", 20),
     # 深度調查報導，對重大案件的長期追蹤特別有價值
     ("twreporter", "報導者", "https://www.twreporter.org", 180),
+    # SPA，API 逾時，但 sitemap 純 HTTP 可取且比 RSS 多兩個數量級
+    ("mirrormedia", "鏡週刊", "https://www.mirrormedia.mg", 60),
 ]
 
 

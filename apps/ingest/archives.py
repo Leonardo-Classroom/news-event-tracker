@@ -22,6 +22,19 @@
   被 Cloudflare 擋。
 - 鏡週刊為 SPA，``/api/v2/posts`` 伺服器端 1.5 秒就逾時。
 
+2026-09-01 逐站量測回補深度後的修正（原註記過於樂觀）：
+
+- **這些端點多半是滾動視窗，不是歷史檔**。中央社硬上限約 100 則
+  （約 5 天）、自由第 26–29 頁即見底（約 1.5 天）、公視約
+  100–200 頁見底（約 1 個月）。走完不等於拿到該站全部歷史。
+- **工商的 ``?page=N`` 根本不生效**：page=1/50/200/400 回傳完全
+  相同的 35 篇。分頁是裝飾用的，實際只有一頁。
+- **公視的 2011-08-02 是最早的文章 ID，不是清單能翻到的最早**，
+  當成 ``earliest`` 會在 UI 顯示一個實際到不了的日期。
+- **鏡週刊可以爬**：robots.txt 露出的 ``/rss/posts.xml`` 是純
+  HTTP 的 sitemap，1500 筆／約 10 天，是 RSS 的兩個數量級。
+  SPA 的 API 仍逾時，但根本不需要走它。
+
 歷史回補不寫入 ``Source.consecutive_failures``——那是即時輪詢的
 健康度，兩者混在一起會讓「立即爬取」被歷史空頁毒掉。
 """
@@ -30,6 +43,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -44,9 +58,10 @@ KIND_DATE = "date"
 KIND_PAGE = "page"
 KIND_OFFSET = "offset"
 
-JSON_CNA = "cna"
-JSON_LTN = "ltn"
-JSON_TWREPORTER = "twreporter"
+PARSER_CNA = "cna"
+PARSER_LTN = "ltn"
+PARSER_TWREPORTER = "twreporter"
+PARSER_SITEMAP = "sitemap"
 
 
 @dataclass(frozen=True)
@@ -59,7 +74,7 @@ class ArchiveSpec:
     url_template: str
     earliest: dt.date | None = None
     adapter_slug: str = ""
-    json_parser: str = ""
+    list_parser: str = ""
     method: str = "GET"
     date_format: str = "%Y%m%d"
     chunk_size: int = 30
@@ -147,48 +162,55 @@ ARCHIVE_SPECS: dict[str, ArchiveSpec] = {
         slug="ctee", kind=KIND_PAGE,
         url_template="https://www.ctee.com.tw/livenews/ctee?page={page}",
         earliest=None,
-        adapter_slug="ctee", chunk_size=10, max_units=500,
-        note="分類頁 ?page=N 純 HTTP；帶日期的路徑被 Cloudflare 擋",
+        adapter_slug="ctee", chunk_size=10, max_units=1,
+        note="分類頁 ?page=N 純 HTTP，但 2026-09-01 實測 page 參數"
+             "根本不生效（page=1/50/200/400 回傳完全相同的 35 篇），"
+             "等於只有一頁近況。帶日期的路徑被 Cloudflare 擋",
     ),
     "pts": _spec(
         slug="pts", kind=KIND_PAGE,
         url_template="https://news.pts.org.tw/dailynews?page={page}",
-        earliest=dt.date(2011, 8, 2),
-        adapter_slug="pts", chunk_size=20, max_units=2000,
-        note="dailynews?page=N；頁碼過高會繞回第 1 頁。文章 ID 1 為 2011-08-02",
+        # 2011-08-02 是站台最早的「文章」（ID 1），不是清單能翻到的
+        # 最早——實測 dailynews 約 100–200 頁就變空（約 2000–3000 則、
+        # 回到 2026-07 左右）。earliest 設 None 才不會在 UI 顯示一個
+        # 實際上到不了的日期。
+        earliest=None,
+        adapter_slug="pts", chunk_size=20, max_units=200,
+        note="dailynews?page=N 實測約 100–200 頁見底（約 2 個月）；"
+             "頁碼過高會繞回第 1 頁。更早的文章 ID 仍在，但清單翻不到",
     ),
     "cna-society": _spec(
         slug="cna-society", kind=KIND_PAGE,
         url_template="https://www.cna.com.tw/cna2018api/api/WNewsList",
-        earliest=None, json_parser=JSON_CNA, method="POST",
+        earliest=None, list_parser=PARSER_CNA, method="POST",
         post_category="asoc", chunk_size=5, max_units=20,
         note="WNewsList POST 只給近約 100 則，沒有可用的日期參數",
     ),
     "cna-politics": _spec(
         slug="cna-politics", kind=KIND_PAGE,
         url_template="https://www.cna.com.tw/cna2018api/api/WNewsList",
-        earliest=None, json_parser=JSON_CNA, method="POST",
+        earliest=None, list_parser=PARSER_CNA, method="POST",
         post_category="aipl", chunk_size=5, max_units=20,
         note="WNewsList POST 只給近約 100 則，沒有可用的日期參數",
     ),
     "cna-mainland": _spec(
         slug="cna-mainland", kind=KIND_PAGE,
         url_template="https://www.cna.com.tw/cna2018api/api/WNewsList",
-        earliest=None, json_parser=JSON_CNA, method="POST",
+        earliest=None, list_parser=PARSER_CNA, method="POST",
         post_category="acn", chunk_size=5, max_units=20,
         note="WNewsList POST 只給近約 100 則，沒有可用的日期參數",
     ),
     "cna-finance": _spec(
         slug="cna-finance", kind=KIND_PAGE,
         url_template="https://www.cna.com.tw/cna2018api/api/WNewsList",
-        earliest=None, json_parser=JSON_CNA, method="POST",
+        earliest=None, list_parser=PARSER_CNA, method="POST",
         post_category="aie", chunk_size=5, max_units=20,
         note="WNewsList POST 只給近約 100 則，沒有可用的日期參數",
     ),
     "ltn": _spec(
         slug="ltn", kind=KIND_PAGE,
         url_template="https://news.ltn.com.tw/ajax/breakingnews/all/{page}",
-        earliest=None, json_parser=JSON_LTN,
+        earliest=None, list_parser=PARSER_LTN,
         chunk_size=10, max_units=500,
         note="ajax JSON；第 2 頁起 data 為 dict。搜尋頁的日期參數不生效",
     ),
@@ -196,14 +218,17 @@ ARCHIVE_SPECS: dict[str, ArchiveSpec] = {
         slug="twreporter", kind=KIND_OFFSET,
         url_template="https://go-api.twreporter.org/v2/posts?offset={offset}&limit=50",
         earliest=dt.date(2015, 12, 14),
-        json_parser=JSON_TWREPORTER, chunk_size=4, max_units=200,
+        list_parser=PARSER_TWREPORTER, chunk_size=4, max_units=200,
         note="go-api /v2/posts 可走完整庫，實測 5922 篇、最早 2015-12-14",
     ),
     "mirrormedia": _spec(
         slug="mirrormedia", kind=KIND_PAGE,
-        url_template="",
-        earliest=None, chunk_size=1, max_units=0,
-        note="站台為 SPA，/api/v2/posts 伺服器 1.5 秒逾時；目前只能靠 RSS 近況",
+        url_template="https://www.mirrormedia.mg/rss/posts.xml",
+        earliest=None, list_parser=PARSER_SITEMAP,
+        chunk_size=1, max_units=1,
+        note="sitemap posts.xml 實測 1500 篇、約 10 天（RSS 只有 20 餘篇）。"
+             "SPA 的 /api/v2/posts 仍逾時，但 sitemap 純 HTTP 可取。"
+             "無分頁參數，站台不提供更早的清單",
     ),
 }
 
@@ -307,8 +332,8 @@ def apply_archive_date(
 def parse_archive_documents(
     spec: ArchiveSpec, raw: str, *, base_url: str,
 ) -> list[ParsedDocument]:
-    if spec.json_parser:
-        parser = _JSON_PARSERS[spec.json_parser]
+    if spec.list_parser:
+        parser = _LIST_PARSERS[spec.list_parser]
         return parser(raw, base_url=base_url)
     if not spec.adapter_slug:
         return []
@@ -388,6 +413,35 @@ def parse_twreporter_json(raw: str, *, base_url: str = "") -> list[ParsedDocumen
     return docs
 
 
+def parse_sitemap_xml(raw: str, *, base_url: str = "") -> list[ParsedDocument]:
+    """sitemap.xml 的 ``<url><loc>`` 清單。
+
+    給沒有可用清單頁或 API 的站台（鏡週刊是 SPA，其 ``/api/v2/posts``
+    實測伺服器端就逾時）。sitemap 是站台自己公開給搜尋引擎的檔案，
+    純 HTTP 可取、不需要渲染。
+
+    只有網址沒有標題——``<loc>`` 就是全部。標題與內文由既有的內頁
+    補齊流程（``fill_missing_bodies``）處理，這裡不猜。
+    """
+    docs: list[ParsedDocument] = []
+    for block in re.findall(r"<url>(.*?)</url>", raw, re.DOTALL):
+        loc = re.search(r"<loc>\s*(.*?)\s*</loc>", block, re.DOTALL)
+        if not loc:
+            continue
+        url = normalize_url(loc.group(1).strip(), base_url)
+        if not url:
+            continue
+        lastmod = re.search(r"<lastmod>\s*(.*?)\s*</lastmod>", block, re.DOTALL)
+        docs.append(ParsedDocument(
+            url=url,
+            # 標題留白：sitemap 沒有標題，硬塞網址片段會污染後續的
+            # 轉載歸併與檢索（標題是 bigram 指紋的一部分）。
+            title="",
+            published_at=parse_datetime(lastmod.group(1)) if lastmod else None,
+        ))
+    return docs
+
+
 def _parse_slash_datetime(raw) -> dt.datetime | None:
     """中央社 ``2026/08/30 22:09``、自由時報 ``2026/08/30 23:58``。
 
@@ -405,10 +459,11 @@ def _parse_slash_datetime(raw) -> dt.datetime | None:
     return parse_datetime(text)
 
 
-_JSON_PARSERS = {
-    JSON_CNA: parse_cna_json,
-    JSON_LTN: parse_ltn_json,
-    JSON_TWREPORTER: parse_twreporter_json,
+_LIST_PARSERS = {
+    PARSER_CNA: parse_cna_json,
+    PARSER_LTN: parse_ltn_json,
+    PARSER_TWREPORTER: parse_twreporter_json,
+    PARSER_SITEMAP: parse_sitemap_xml,
 }
 
 

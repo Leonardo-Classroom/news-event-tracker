@@ -73,6 +73,7 @@ class ExtractedArticle:
     body: str
     published_at: object | None = None      # datetime.date 或 None
     author: str = ""
+    title: str = ""                         # 清單頁沒給標題時（如 sitemap）才用得上
     strategy: str = ""                      # 實際生效的抽取策略，供除錯與監測
 
 
@@ -86,9 +87,24 @@ def _walk(obj):
             yield from _walk(value)
 
 
-def _from_json_ld(tree: HTMLParser) -> tuple[str, str, str]:
-    """回傳 (內文, 發布時間字串, 作者)。取不到的部分為空字串。"""
-    body = date = author = ""
+def _title_from_meta(tree: HTMLParser) -> str:
+    """og:title → <title>。給 sitemap 這類只有網址、沒有標題的清單用。
+
+    標題不是可有可無的欄位：它進 ``search_text``，也是轉載歸併
+    bigram 指紋的一部分，缺了會讓該文件在檢索與去重上等同隱形。
+    """
+    node = tree.css_first("meta[property='og:title']")
+    if node:
+        value = (node.attributes.get("content") or "").strip()
+        if value:
+            return value
+    node = tree.css_first("title")
+    return node.text().strip() if node else ""
+
+
+def _from_json_ld(tree: HTMLParser) -> tuple[str, str, str, str]:
+    """回傳 (內文, 發布時間字串, 作者, 標題)。取不到的部分為空字串。"""
+    body = date = author = title = ""
     for block in tree.css('script[type="application/ld+json"]'):
         try:
             data = json.loads(block.text())
@@ -108,7 +124,9 @@ def _from_json_ld(tree: HTMLParser) -> tuple[str, str, str]:
                     author = str(raw_author.get("name") or "")
                 elif isinstance(raw_author, str):
                     author = raw_author
-    return body, date, author
+            if not title and isinstance(node.get("headline"), str):
+                title = node["headline"]
+    return body, date, author, title
 
 
 def _date_from_meta(tree: HTMLParser) -> str:
@@ -134,7 +152,7 @@ def extract_published_at(html: str):
     if not html or not html.strip():
         return None
     tree = HTMLParser(html)
-    _, date_text, _ = _from_json_ld(tree)
+    _, date_text, _, _ = _from_json_ld(tree)
     if not date_text:
         date_text = _date_from_meta(tree)
     return parse_datetime(date_text) if date_text else None
@@ -168,10 +186,12 @@ def extract_article(html: str, *, source_slug: str = "") -> ExtractedArticle:
 
     tree = HTMLParser(html)
 
-    body, date_text, author = _from_json_ld(tree)
+    body, date_text, author, title = _from_json_ld(tree)
     strategy = "json-ld"
     if not date_text:
         date_text = _date_from_meta(tree)
+    if not title:
+        title = _title_from_meta(tree)
 
     if len(body) < _MIN_BODY_LENGTH:
         selector = BODY_SELECTORS.get(source_slug)
@@ -196,5 +216,6 @@ def extract_article(html: str, *, source_slug: str = "") -> ExtractedArticle:
         body=body,
         published_at=published,
         author=(author or "").strip()[:128],
+        title=" ".join((title or "").split())[:512],
         strategy=strategy,
     )

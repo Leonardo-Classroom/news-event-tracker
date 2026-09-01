@@ -122,11 +122,12 @@ def _fetch_latest(
         return collected
 
     pages_walked = 1
-    while page_docs and pages_walked < LIVE_WALK_MAX_PAGES:
+    while page_docs and pages_walked < min(LIVE_WALK_MAX_PAGES, spec.max_units):
         urls = [d.url for d in page_docs if d.url]
         already_known = Document.objects.filter(url__in=urls).exists()
         if already_known:
             break       # 追上了：這頁（含）之後都看過了，不用再往回翻
+        previous_urls = set(urls)
         cursor = advance_cursor(spec, cursor)
         try:
             request = build_request(spec, cursor)
@@ -134,6 +135,11 @@ def _fetch_latest(
             page_docs = parse_archive_documents(spec, raw, base_url=source.base_url)
         except (FetchError, ValueError):
             # 後面幾頁失敗不該讓已經抓到的最新內容也一起被丟棄。
+            break
+        # 有些站台的分頁參數是裝飾用的：工商 ?page=N 實測 page=1 與
+        # page=400 回傳完全相同的 35 篇。翻到一樣的東西就停，否則會
+        # 一路白抓到上限。歷史回補靠 first_fp 指紋擋，即時輪詢靠這裡。
+        if {d.url for d in page_docs if d.url} == previous_urls:
             break
         collected.extend(page_docs)
         pages_walked += 1
@@ -207,7 +213,6 @@ def upsert_parsed_documents(source: Source, parsed, now) -> tuple[int, int, int]
             continue
         defaults = {
             "source": source,
-            "title": doc.title[:512],
             "author": doc.author,
             "external_id": doc.external_id,
             "content_class": source.content_class,
@@ -215,6 +220,10 @@ def upsert_parsed_documents(source: Source, parsed, now) -> tuple[int, int, int]
         }
         if doc.published_at:
             defaults["published_at"] = doc.published_at
+        # sitemap 這類清單只有網址、沒有標題。空標題不可覆寫既有值——
+        # 同 published_at 的理由：重跑時會把內頁補回來的標題抹掉。
+        if doc.title:
+            defaults["title"] = doc.title[:512]
         with transaction.atomic():
             _, was_created = Document.objects.update_or_create(
                 url=doc.url, defaults=defaults)
@@ -327,8 +336,12 @@ def fetch_document_body(
     # 內頁的 JSON-LD 日期通常比清單頁可靠；僅在原本缺值時補上
     if article.published_at and not document.published_at:
         document.published_at = article.published_at
+    # sitemap 只有網址沒有標題，標題只能在這裡補回來。同樣只補缺值——
+    # 清單頁給的標題是站台自己的呈現，不該被內頁的 og:title 覆寫。
+    if article.title and not document.title:
+        document.title = article.title
     # raw_body 屬於 DERIVED_SOURCES，save() 會自動重算 simhash 與 search_text
-    document.save(update_fields=["raw_body", "author", "published_at"])
+    document.save(update_fields=["raw_body", "author", "published_at", "title"])
     return True
 
 
