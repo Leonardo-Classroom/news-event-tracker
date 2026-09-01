@@ -268,6 +268,92 @@ class TestIngestSourceArchiveSpec:
         source.refresh_from_db()
         assert source.consecutive_failures == 1
 
+    def test_分頁走訪遇到已入庫文章就停止翻頁(self, source):
+        """兩次輪詢間發布量若超過單頁筆數，第一頁看不到的文章不能
+        永遠漏掉——要主動往回翻，翻到看過的為止。"""
+        spec = get_archive_spec("ltn")
+        Document.objects.create(
+            source=source, url="https://news.ltn.com.tw/news/breakingnews/old",
+            title="舊聞", content_class="copyrighted",
+        )
+        page1_url = "https://news.ltn.com.tw/ajax/breakingnews/all/1"
+        page2_url = "https://news.ltn.com.tw/ajax/breakingnews/all/2"
+        page3_url = "https://news.ltn.com.tw/ajax/breakingnews/all/3"
+        page1 = json.dumps({"data": {"1": {
+            "url": "https://news.ltn.com.tw/news/breakingnews/new1",
+            "title": "新聞1", "time": "2026/08/31 12:00", "no": "1"}}})
+        page2 = json.dumps({"data": {"1": {
+            "url": "https://news.ltn.com.tw/news/breakingnews/old",
+            "title": "舊聞", "time": "2026/08/31 11:00", "no": "old"}}})
+        fetcher = FakeFetcher({page1_url: page1, page2_url: page2,
+                               page3_url: "不該被抓到"})
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=UTC))
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok
+        assert page3_url not in fetcher.calls   # 第 2 頁遇到舊聞，第 3 頁不該被抓
+        assert Document.objects.filter(
+            url="https://news.ltn.com.tw/news/breakingnews/new1").exists()
+
+    def test_分頁走訪整頁都是新的才繼續翻頁(self, source):
+        spec = get_archive_spec("ltn")
+        page1_url = "https://news.ltn.com.tw/ajax/breakingnews/all/1"
+        page2_url = "https://news.ltn.com.tw/ajax/breakingnews/all/2"
+        page1 = json.dumps({"data": {"1": {
+            "url": "https://news.ltn.com.tw/news/breakingnews/a",
+            "title": "A", "time": "2026/08/31 12:00", "no": "a"}}})
+        page2 = json.dumps({"data": {"1": {
+            "url": "https://news.ltn.com.tw/news/breakingnews/b",
+            "title": "B", "time": "2026/08/31 11:50", "no": "b"}}})
+        fetcher = FakeFetcher({page1_url: page1, page2_url: page2})
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=UTC))
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok
+        assert page2_url in fetcher.calls
+        assert Document.objects.count() == 2
+
+    def test_分頁走訪有安全頁數上限(self, source):
+        """來源第一次輪詢、資料庫完全沒有既有 URL 可比對時，不能
+        無限翻頁把整站當歷史來爬。"""
+        spec = get_archive_spec("ltn")
+        fetcher = FakeFetcher()
+        for page in range(1, 8):
+            url = f"https://news.ltn.com.tw/ajax/breakingnews/all/{page}"
+            fetcher.register(url, json.dumps({"data": {"1": {
+                "url": f"https://news.ltn.com.tw/news/breakingnews/p{page}",
+                "title": f"p{page}", "time": "2026/08/31 12:00", "no": str(page),
+            }}}))
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=UTC))
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok
+        assert len(fetcher.calls) == 5          # LIVE_WALK_MAX_PAGES
+        assert Document.objects.count() == 5
+
+    def test_日期走訪不翻頁(self, source):
+        """ETtoday／公視這類日期走訪每次都整頁重抓當天全部清單，
+        不是固定筆數快照，沒有「翻頁」的概念。"""
+        spec = get_archive_spec("ettoday")
+        clock = FixedClock(dt.datetime(2026, 8, 31, 3, tzinfo=UTC))
+        url = "https://www.ettoday.net/news/news-list-2026-08-31-0.htm"
+        html = ('<div class="part_list_2"><h3>'
+                '<a href="https://www.ettoday.net/news/123456.htm">測試</a>'
+                '</h3></div>')
+        fetcher = FakeFetcher({url: html})
+
+        result = ingest_source(source, fetcher=fetcher, clock=clock,
+                               archive_spec=spec)
+
+        assert result.ok
+        assert fetcher.calls == [url]
+
 
 @pytest.mark.medium
 class TestFillMissingPublishedAt:

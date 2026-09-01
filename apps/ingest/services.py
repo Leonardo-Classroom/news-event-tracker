@@ -15,8 +15,8 @@ from django.utils import timezone
 from apps.core.clock import Clock, SystemClock
 from apps.ingest.adapters import get_adapter
 from apps.ingest.archives import (
-    TAIPEI, ArchiveSpec, build_request, fetch_archive_page, live_cursor,
-    parse_archive_documents,
+    KIND_DATE, TAIPEI, ArchiveSpec, advance_cursor, build_request,
+    fetch_archive_page, live_cursor, parse_archive_documents,
 )
 from apps.ingest.fetchers import FetchError, Fetcher, HttpFetcher
 from apps.ingest.models import Document, Source
@@ -33,6 +33,13 @@ BACKOFF_MULTIPLIER = 6
 #: 1–2 分鐘，browser 任務 soft limit 10 分鐘，20 分鐘夠把正常執行
 #: 與卡死分開。
 IN_PROGRESS_STALE = dt.timedelta(minutes=20)
+
+#: 分頁／offset 走訪的即時輪詢一次最多翻幾頁。安全上限，不是效能
+#: 調校——沒有這個上限，一個從沒被抓過的新來源（資料庫裡完全沒有
+#: 既有 URL 可比對）會被單次即時輪詢當成整站歷史來爬，可能撐爆
+#: poll_source 的時限。翻頁只在真的有新內容時才發生，正常情況下
+#: 走不到這個上限。
+LIVE_WALK_MAX_PAGES = 5
 
 
 @dataclass
@@ -90,6 +97,49 @@ def _fetch(fetcher, url: str, render_options=None):
     return fetcher.get(url)
 
 
+def _fetch_latest(
+    spec: ArchiveSpec, source: Source, fetcher: Fetcher, now: dt.datetime,
+) -> list:
+    """從最新往回翻，翻到遇到已經入庫過的文章就停止。
+
+    日期走訪（``KIND_DATE``，如 ETtoday／公視）不适用這個邏輯：
+    清單本身就是「今天到目前為止的全部」，不是「最新 N 則」，每次
+    整頁重抓就不會漏，也沒有「翻頁」的概念。
+
+    分頁／offset 走訪（中央社、自由時報、工商、公視、報導者）給的
+    是固定筆數的快照——若兩次輪詢間發布量超過這個筆數，捲出範圍的
+    文章不會再出現在任何一頁。解法是主動往後翻，翻到看到「已經看過
+    的文章」為止：新聞清單是新到舊排序，一旦遇到已入庫的 URL，代表
+    後面（更舊的）也一定已經處理過，不必再往下翻。
+    """
+    cursor = live_cursor(spec, now.astimezone(TAIPEI).date())
+    request = build_request(spec, cursor)
+    raw = fetch_archive_page(fetcher, spec, request)   # 第一頁失敗要讓呼叫端記為來源失敗
+    page_docs = parse_archive_documents(spec, raw, base_url=source.base_url)
+    collected = list(page_docs)
+
+    if spec.kind == KIND_DATE:
+        return collected
+
+    pages_walked = 1
+    while page_docs and pages_walked < LIVE_WALK_MAX_PAGES:
+        urls = [d.url for d in page_docs if d.url]
+        already_known = Document.objects.filter(url__in=urls).exists()
+        if already_known:
+            break       # 追上了：這頁（含）之後都看過了，不用再往回翻
+        cursor = advance_cursor(spec, cursor)
+        try:
+            request = build_request(spec, cursor)
+            raw = fetch_archive_page(fetcher, spec, request)
+            page_docs = parse_archive_documents(spec, raw, base_url=source.base_url)
+        except (FetchError, ValueError):
+            # 後面幾頁失敗不該讓已經抓到的最新內容也一起被丟棄。
+            break
+        collected.extend(page_docs)
+        pages_walked += 1
+    return collected
+
+
 def ingest_source(
     source: Source,
     *,
@@ -107,7 +157,10 @@ def ingest_source(
     ``archive_spec`` 給有 ``apps.ingest.archives.ArchiveSpec`` 的來源
     （原本只用於歷史回補）：即時輪詢改抓「最新」而非「最舊」
     （見 ``live_cursor``），沿用同一份 URL／POST body／解析邏輯，
-    不必為即時路徑另外維護一份 RSS 以外的請求組法。
+    不必為即時路徑另外維護一份 RSS 以外的請求組法。分頁／offset
+    走訪的來源會一路翻到遇到已入庫的文章為止（見 ``_fetch_latest``），
+    不是只看固定的第一頁——否則兩次輪詢間發布量一多，捲出範圍的
+    文章永遠不會被撈到。
     """
     clock = clock or SystemClock()
     fetcher = fetcher or HttpFetcher()
@@ -116,11 +169,7 @@ def ingest_source(
 
     try:
         if archive_spec is not None:
-            cursor = live_cursor(archive_spec, now.astimezone(TAIPEI).date())
-            request = build_request(archive_spec, cursor)
-            raw = fetch_archive_page(fetcher, archive_spec, request)
-            parsed = parse_archive_documents(
-                archive_spec, raw, base_url=source.base_url)
+            parsed = _fetch_latest(archive_spec, source, fetcher, now)
         else:
             url = source.feed_url or source.base_url
             response = _fetch(fetcher, url, render_options)
