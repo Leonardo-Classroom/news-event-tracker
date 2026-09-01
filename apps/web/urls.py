@@ -28,6 +28,7 @@ urlpatterns = [
     path("crawlers/<slug:slug>/run/", views.crawler_run, name="crawler_run"),
     path("crawlers/<slug:slug>/update/", views.crawler_update, name="crawler_update"),
     path("crawlers/<slug:slug>/history/", views.crawler_history, name="crawler_history"),
+    path("crawlers/<slug:slug>/history/status/", views.crawler_history_status, name="crawler_history_status"),
     path("crawlers/history/all/", views.crawler_history_all, name="crawler_history_all"),
     path("crawlers/sessions/<slug:slug>/save/", views.save_external_session, name="save_external_session"),
     path("costs/", views.costs, name="costs"),

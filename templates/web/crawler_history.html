@@ -31,38 +31,16 @@
     </tr></thead>
     <tbody>
     {% for row in rows %}
-      <tr>
+      <tr id="history-row-{{ row.source.slug }}"
+          {% if row.historical_running or row.historical_queued %}data-polling="1"{% endif %}>
         <td class="tight"><b>{{ row.source.name }}</b><br><span style="color:var(--text-3)">{{ row.source.slug }}</span></td>
         <td class="tight">
           {% if row.archive_earliest %}<span class="mono">{{ row.archive_earliest|date:"Y-m-d" }}</span>
           {% else %}—{% endif %}
           {% if row.spec %}<div style="font-size:11px;color:var(--text-3);max-width:360px;white-space:normal;margin-top:2px">{{ row.spec.note }}</div>{% endif %}
         </td>
-        <td class="tight">
-          {% if row.historical_running and row.historical_cursor %}<span class="tag accent">回補中</span>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px">進度 {{ row.historical_cursor }}　篇數會隨抓取增加</div>
-          {% elif row.historical_running or row.historical_queued %}<span class="tag warn">已派工</span>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px">worker 尚未接手；若超過數分鐘篇數仍不變，需重啟 Celery</div>
-          {% elif row.source.historical_status == "done" %}<span class="tag ok">已完成</span>
-            {% if row.source.historical_finished_at %}
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">{{ row.source.historical_finished_at|date:"m-d H:i" }}</div>
-            {% endif %}
-          {% elif row.source.historical_status == "error" %}<span class="tag danger">失敗</span>
-            {% if row.source.historical_error %}
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px;max-width:280px;white-space:normal">{{ row.source.historical_error }}</div>
-            {% endif %}
-          {% elif row.can_backfill %}<span class="tag muted">未執行</span>
-          {% else %}<span class="tag muted">無歷史清單</span>{% endif %}
-        </td>
-        <td class="tight">
-          {% if row.can_backfill %}
-          <form method="post" action="{% url 'web:crawler_history' row.source.slug %}">
-            {% csrf_token %}
-            <button class="btn" style="padding:2px 10px"
-                    {% if row.historical_running %}disabled{% endif %}>歷史回補</button>
-          </form>
-          {% else %}—{% endif %}
-        </td>
+        <td class="tight history-status">{% include "web/_history_status_cell.html" %}</td>
+        <td class="tight history-action">{% include "web/_history_action_cell.html" %}</td>
       </tr>
     {% empty %}
       <tr><td colspan="4" class="empty">尚無註冊的來源</td></tr>
@@ -71,4 +49,54 @@
   </table>
   </div>
 </div>
+
+<script>
+(function() {
+  // 點「歷史回補」不整頁跳轉／不整頁重新整理——用 fetch 送出，
+  // 拿回這一列狀態欄與按鈕欄的最新 HTML 直接換掉，派工後立刻看到
+  // 「已派工／回補中」，並自動輪詢到完成或失敗為止才停止。
+  var timers = {};
+
+  function updateRow(slug, data) {
+    var row = document.getElementById("history-row-" + slug);
+    if (!row) return;
+    row.querySelector(".history-status").innerHTML = data.status_html;
+    row.querySelector(".history-action").innerHTML = data.action_html;
+    bindTriggerForm(row.querySelector(".history-trigger-form"));
+    if (data.polling) {
+      startPolling(slug);
+    } else if (timers[slug]) {
+      clearInterval(timers[slug]);
+      delete timers[slug];
+    }
+  }
+
+  function startPolling(slug) {
+    if (timers[slug]) return;
+    timers[slug] = setInterval(function() {
+      fetch("/crawlers/" + slug + "/history/status/")
+        .then(function(r) { return r.json(); })
+        .then(function(data) { updateRow(slug, data); });
+    }, 4000);
+  }
+
+  function bindTriggerForm(form) {
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+    form.addEventListener("submit", function(ev) {
+      ev.preventDefault();
+      var slug = form.dataset.slug;
+      var token = form.querySelector("[name=csrfmiddlewaretoken]").value;
+      fetch(form.action, {method: "POST", headers: {"X-CSRFToken": token}})
+        .then(function(r) { return r.json(); })
+        .then(function(data) { updateRow(slug, data); });
+    });
+  }
+
+  document.querySelectorAll(".history-trigger-form").forEach(bindTriggerForm);
+  document.querySelectorAll("tr[data-polling='1']").forEach(function(tr) {
+    startPolling(tr.id.replace("history-row-", ""));
+  });
+})();
+</script>
 {% endblock %}

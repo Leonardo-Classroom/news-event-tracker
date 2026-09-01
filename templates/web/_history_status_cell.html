@@ -1,0 +1,14 @@
+{% if row.historical_running and row.historical_cursor %}<span class="tag accent">回補中</span>
+  <div style="font-size:11px;color:var(--text-3);margin-top:2px">進度 {{ row.historical_cursor }}　篇數會隨抓取增加</div>
+{% elif row.historical_running or row.historical_queued %}<span class="tag warn">已派工</span>
+  <div style="font-size:11px;color:var(--text-3);margin-top:2px">worker 尚未接手；若超過數分鐘篇數仍不變，需重啟 Celery</div>
+{% elif row.source.historical_status == "done" %}<span class="tag ok">已完成</span>
+  {% if row.source.historical_finished_at %}
+    <div style="font-size:11px;color:var(--text-3);margin-top:2px">{{ row.source.historical_finished_at|date:"m-d H:i" }}</div>
+  {% endif %}
+{% elif row.source.historical_status == "error" %}<span class="tag danger">失敗</span>
+  {% if row.source.historical_error %}
+    <div style="font-size:11px;color:var(--text-3);margin-top:2px;max-width:280px;white-space:normal">{{ row.source.historical_error }}</div>
+  {% endif %}
+{% elif row.can_backfill %}<span class="tag muted">未執行</span>
+{% else %}<span class="tag muted">無歷史清單</span>{% endif %}

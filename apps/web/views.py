@@ -22,7 +22,9 @@ import datetime as dt
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Case, Count, F, IntegerField, Max, Min, Q, Sum, Value, When
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -578,31 +580,67 @@ def crawler_update(request, slug):
     return redirect("web:crawlers")
 
 
+def _history_row_for(source: Source) -> dict:
+    """單一來源的排程／覆蓋率資料——輪詢用，不必為了一列查全部來源。"""
+    now = timezone.now()
+    cov = source_coverage().get(source.id) or {}
+    spec = get_archive_spec(source.slug)
+    return {
+        "source": source,
+        "spec": spec,
+        "archive_earliest": (
+            source.archive_earliest_on_site
+            or (spec.earliest if spec else None)
+        ),
+        "historical_running": historical_in_progress(source, now),
+        "historical_cursor": cursor_label(source),
+        "historical_queued": (
+            source.historical_status == "running"
+            and not source.historical_cursor
+        ),
+        "can_backfill": bool(
+            spec and spec.url_template and source.type in NEWS_POLL_TYPES
+        ),
+    }
+
+
+def _history_fragment_response(source: Source) -> JsonResponse:
+    """歷史回補按鈕不整頁跳轉——回傳這一列狀態欄／按鈕欄的最新 HTML，
+    前端直接換掉對應的 <td>，並依 ``polling`` 決定要不要繼續輪詢。
+    """
+    row = _history_row_for(source)
+    return JsonResponse({
+        "status_html": render_to_string("web/_history_status_cell.html", {"row": row}),
+        "action_html": render_to_string("web/_history_action_cell.html", {"row": row}),
+        "polling": bool(row["historical_running"] or row["historical_queued"]),
+    })
+
+
+@require_role(Role.ADMIN)
+def crawler_history_status(request, slug):
+    """歷史回補的輪詢端點：純讀取，不觸發任何動作。"""
+    source = get_object_or_404(Source, slug=slug)
+    return _history_fragment_response(source)
+
+
 @require_role(Role.ADMIN)
 @require_POST
 def crawler_history(request, slug):
-    """手動觸發單一來源從古至今回補。可重複執行（寫入冪等）。"""
+    """手動觸發單一來源從古至今回補。可重複執行（寫入冪等）。
+
+    回傳這一列的最新狀態片段，不整頁跳轉——按鈕留在歷史回補頁，
+    點下去立刻看到「已派工」，之後由前端輪詢 ``crawler_history_status``
+    更新到完成或失敗為止。已在進行中時不重複派工，但仍回傳目前狀態
+    （對使用者來說「又點了一次」不該是錯誤，只是沒有新效果）。
+    """
     source = get_object_or_404(Source, slug=slug)
-    if historical_in_progress(source):
-        messages.error(request, f"「{source.name}」的歷史回補仍在進行中")
-        return redirect("web:crawlers")
-    try:
-        mark_historical_started(source)
-        dispatch_historical(source)
-    except ValueError as exc:
-        messages.error(request, str(exc))
-        return redirect("web:crawlers")
-    spec = get_archive_spec(source.slug)
-    start = (
-        source.archive_earliest_on_site
-        or (spec.earliest if spec else None)
-    )
-    extra = f"，自 {start.isoformat()} 起" if start else ""
-    messages.success(
-        request,
-        f"已派發「{source.name}」的歷史回補{extra}，完成前請重新整理",
-    )
-    return redirect("web:crawlers")
+    if not historical_in_progress(source):
+        try:
+            mark_historical_started(source)
+            dispatch_historical(source)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+    return _history_fragment_response(source)
 
 
 @require_role(Role.ADMIN)
@@ -634,7 +672,7 @@ def crawler_history_all(request):
         )
     if not dispatched and not skipped:
         messages.error(request, "沒有可回補的新聞來源")
-    return redirect("web:crawlers")
+    return redirect("web:crawler_history_page")
 
 
 @require_role(Role.ADMIN)

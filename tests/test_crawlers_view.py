@@ -127,7 +127,8 @@ class TestCrawlersView:
         assert crawl_source.name in html
         assert "執行狀態" in html
 
-    def test_歷史回補會派工(self, admin_client, db):
+    def test_歷史回補會派工且不跳轉(self, admin_client, db):
+        """按鈕留在原頁——回傳這一列的狀態片段，不是整頁 redirect。"""
         source = Source.objects.create(
             slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
             base_url="https://udn.com",
@@ -136,11 +137,28 @@ class TestCrawlersView:
             response = admin_client.post(f"/crawlers/{source.slug}/history/")
         mocked.assert_called_once()
         assert mocked.call_args[0][0].pk == source.pk
-        assert response.status_code == 302
+        assert response.status_code == 200
         source.refresh_from_db()
         assert source.historical_status == "running"
-        html = admin_client.get("/crawlers/history/").content.decode()
-        assert "已派工" in html
+        data = response.json()
+        assert "已派工" in data["status_html"]
+        assert data["polling"] is True
+
+    def test_輪詢端點回傳目前狀態(self, admin_client, db):
+        """純讀取，不觸發新的回補。"""
+        source = Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+            historical_status="done",
+            historical_finished_at=dt.datetime.now(UTC),
+        )
+        with patch("apps.web.views.dispatch_historical") as mocked:
+            response = admin_client.get(f"/crawlers/{source.slug}/history/status/")
+        mocked.assert_not_called()
+        assert response.status_code == 200
+        data = response.json()
+        assert "已完成" in data["status_html"]
+        assert data["polling"] is False
 
     def test_有進度cursor時顯示回補中(self, admin_client, db):
         Source.objects.create(
@@ -161,6 +179,7 @@ class TestCrawlersView:
         assert response.status_code == 405
 
     def test_進行中的歷史回補不重複派工(self, admin_client, db):
+        """又點一次不是錯誤——只是沒有新效果，仍回傳目前狀態片段。"""
         source = Source.objects.create(
             slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
             base_url="https://udn.com",
@@ -168,8 +187,10 @@ class TestCrawlersView:
             historical_updated_at=dt.datetime.now(UTC),
         )
         with patch("apps.web.views.dispatch_historical") as mocked:
-            admin_client.post(f"/crawlers/{source.slug}/history/")
+            response = admin_client.post(f"/crawlers/{source.slug}/history/")
         mocked.assert_not_called()
+        assert response.status_code == 200
+        assert response.json()["polling"] is True
 
     def test_全部回補略過司法來源(self, admin_client, db):
         Source.objects.create(

@@ -1,0 +1,7 @@
+{% if row.can_backfill %}
+<form method="post" action="{% url 'web:crawler_history' row.source.slug %}" class="history-trigger-form" data-slug="{{ row.source.slug }}">
+  {% csrf_token %}
+  <button class="btn" style="padding:2px 10px"
+          {% if row.historical_running %}disabled{% endif %}>歷史回補</button>
+</form>
+{% else %}—{% endif %}
