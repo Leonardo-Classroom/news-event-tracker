@@ -28,7 +28,8 @@
           文件<span class="count">{{ nav_counts.documents }}</span></a>
         <a href="{% url 'web:pipeline' %}" class="{% if nav == 'pipeline' %}active{% endif %}">
           管線狀態{% if nav_counts.unhealthy %}<span class="count" style="color:var(--danger)">{{ nav_counts.unhealthy }}</span>{% endif %}</a>
-        {% if request.user.is_staff %}<a href="{% url 'web:crawlers' %}" class="{% if nav == 'crawlers' %}active{% endif %}">爬蟲</a>{% endif %}
+        {% if request.user.is_staff %}<a href="{% url 'web:crawlers' %}" class="{% if nav == 'crawlers' %}active{% endif %}">爬蟲</a>
+        <a href="{% url 'web:crawler_history_page' %}" class="{% if nav == 'crawler_history' %}active{% endif %}">歷史回補</a>{% endif %}
       </div>
       {% if request.user.is_staff %}
       <div class="nav-group">

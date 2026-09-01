@@ -483,7 +483,7 @@ def crawler_history_page(request):
     """
     rows = _crawler_rows(timezone.now())
     return render(request, "web/crawler_history.html", {
-        "nav": "crawlers", "rows": rows,
+        "nav": "crawler_history", "rows": rows,
     })
 
 
