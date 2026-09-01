@@ -118,8 +118,14 @@ class TestCrawlersView:
         html = admin_client.get("/crawlers/").content.decode()
         assert "2016-07-01" in html
         assert "2026-08-31" in html
-        assert "高級功能：從古至今回補" in html
+        assert "歷史回補" in html          # 連到獨立頁面的連結
         assert "最舊" in html and "最新" in html
+
+    def test_歷史回補獨立頁顯示執行狀態(self, admin_client, crawl_source):
+        """任務拆解 61：歷史回補搬到獨立頁面，仍要看得到執行狀態。"""
+        html = admin_client.get("/crawlers/history/").content.decode()
+        assert crawl_source.name in html
+        assert "執行狀態" in html
 
     def test_歷史回補會派工(self, admin_client, db):
         source = Source.objects.create(
@@ -133,7 +139,7 @@ class TestCrawlersView:
         assert response.status_code == 302
         source.refresh_from_db()
         assert source.historical_status == "running"
-        html = admin_client.get("/crawlers/").content.decode()
+        html = admin_client.get("/crawlers/history/").content.decode()
         assert "已派工" in html
 
     def test_有進度cursor時顯示回補中(self, admin_client, db):
@@ -144,7 +150,7 @@ class TestCrawlersView:
             historical_cursor='{"date":"2016-07-15","page":1,"offset":0}',
             historical_updated_at=dt.datetime.now(UTC),
         )
-        html = admin_client.get("/crawlers/").content.decode()
+        html = admin_client.get("/crawlers/history/").content.decode()
         assert "回補中" in html
         assert "2016-07-15" in html
 

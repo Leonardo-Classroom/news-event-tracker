@@ -24,6 +24,7 @@ urlpatterns = [
     path("documents/<int:pk>/", views.document_detail, name="document_detail"),
     path("pipeline/", views.pipeline, name="pipeline"),
     path("crawlers/", views.crawlers, name="crawlers"),
+    path("crawlers/history/", views.crawler_history_page, name="crawler_history_page"),
     path("crawlers/<slug:slug>/run/", views.crawler_run, name="crawler_run"),
     path("crawlers/<slug:slug>/update/", views.crawler_update, name="crawler_update"),
     path("crawlers/<slug:slug>/history/", views.crawler_history, name="crawler_history"),

@@ -406,15 +406,13 @@ EXTERNAL_SESSIONS = {
 }
 
 
-@require_role(Role.ADMIN)
-def crawlers(request):
-    """爬蟲排程設定與手動觸發。
+def _crawler_rows(now):
+    """組出每個來源一列的排程／覆蓋率資料。
 
-    與 ``pipeline`` 的分工：pipeline 是**觀察**（健康度、覆蓋率），
-    這裡是**操作**（改排程、立即跑一次）。兩者都需要時硬湊在同一頁
-    會讓「看數字」與「按按鈕」互相干擾，拆開比較不會誤觸。
+    ``crawlers`` 頁（排程設定）與 ``crawler_history_page``（歷史回補，
+    獨立頁面）都需要同一份資料，抽出來避免兩處各查一次、日後改欄位
+    只改到其中一處而分岔。
     """
-    now = timezone.now()
     coverage = source_coverage()
     rows = []
     for source in Source.objects.order_by("-enabled", "name"):
@@ -446,6 +444,23 @@ def crawlers(request):
                 spec and spec.url_template and source.type in NEWS_POLL_TYPES
             ),
         })
+    return rows
+
+
+@require_role(Role.ADMIN)
+def crawlers(request):
+    """爬蟲排程設定與手動觸發。
+
+    與 ``pipeline`` 的分工：pipeline 是**觀察**（健康度、覆蓋率），
+    這裡是**操作**（改排程、立即跑一次）。兩者都需要時硬湊在同一頁
+    會讓「看數字」與「按按鈕」互相干擾，拆開比較不會誤觸。
+
+    歷史回補（低頻、一次性、跑數小時到數天的操作）獨立成
+    ``crawler_history_page``，不擠在同一頁的摺疊區塊——那樣容易被
+    忽略，也讓這頁的排程表格與回補表格互相干擾捲動。
+    """
+    now = timezone.now()
+    rows = _crawler_rows(now)
 
     sessions = []
     for slug, (name, login_url) in EXTERNAL_SESSIONS.items():
@@ -455,6 +470,20 @@ def crawlers(request):
 
     return render(request, "web/crawlers.html", {
         "nav": "crawlers", "rows": rows, "now": now, "sessions": sessions,
+    })
+
+
+@require_role(Role.ADMIN)
+def crawler_history_page(request):
+    """歷史回補管理：獨立頁面，顯示每個來源的可回溯範圍與執行狀態。
+
+    列出全部來源（包含沒有歷史清單路徑的），而非只列可回補的——
+    「這個來源目前無法回補」本身也是有用的資訊，篩掉會讓人以為
+    漏了設定。
+    """
+    rows = _crawler_rows(timezone.now())
+    return render(request, "web/crawler_history.html", {
+        "nav": "crawlers", "rows": rows,
     })
 
 
