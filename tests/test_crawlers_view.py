@@ -162,6 +162,24 @@ class TestCrawlersView:
         assert "已派工" in data["status_html"]
         assert data["polling"] is True
 
+    def test_歷史回補頁顯示篇數且輪詢會更新(self, admin_client, db):
+        """回補進行中篇數會一直增加，只更新狀態文字看不出有沒有在動。"""
+        from apps.ingest.models import ContentClass, Document
+
+        source = Source.objects.create(
+            slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
+            base_url="https://udn.com",
+        )
+        for i in range(3):
+            Document.objects.create(
+                source=source, url=f"https://udn.com/news/story/1/{i}",
+                title=f"文章{i}", content_class=ContentClass.COPYRIGHTED,
+            )
+        assert "history-count" in admin_client.get("/crawlers/history/").content.decode()
+
+        data = admin_client.get(f"/crawlers/{source.slug}/history/status/").json()
+        assert data["doc_count"] == 3
+
     def test_輪詢端點回傳目前狀態(self, admin_client, db):
         """純讀取，不觸發新的回補。"""
         source = Source.objects.create(

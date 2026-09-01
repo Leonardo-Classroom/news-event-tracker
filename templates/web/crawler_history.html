@@ -32,7 +32,7 @@
   <div class="table-scroll">
   <table>
     <thead><tr>
-      <th>來源</th><th>站台可回溯</th><th>執行狀態</th><th></th>
+      <th>來源</th><th>站台可回溯</th><th class="num">篇數</th><th>執行狀態</th><th></th>
     </tr></thead>
     <tbody>
     {% for row in rows %}
@@ -46,11 +46,12 @@
           {% else %}—{% endif %}
           {% if row.spec %}<div style="font-size:11px;color:var(--text-3);max-width:360px;white-space:normal;margin-top:2px">{{ row.spec.note }}</div>{% endif %}
         </td>
+        <td class="num tight mono history-count">{{ row.doc_count }}</td>
         <td class="tight history-status">{% include "web/_history_status_cell.html" %}</td>
         <td class="tight history-action">{% include "web/_history_action_cell.html" %}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="4" class="empty">尚無註冊的來源</td></tr>
+      <tr><td colspan="5" class="empty">尚無註冊的來源</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -69,6 +70,8 @@
     if (!row) return;
     row.querySelector(".history-status").innerHTML = data.status_html;
     row.querySelector(".history-action").innerHTML = data.action_html;
+    // 篇數在回補進行中會一直增加，是「真的有在抓」最直接的證據
+    row.querySelector(".history-count").textContent = data.doc_count;
     bindTriggerForm(row.querySelector(".history-trigger-form"));
     if (data.polling) {
       startPolling(slug);

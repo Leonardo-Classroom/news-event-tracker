@@ -601,15 +601,20 @@ def _history_row_for(source: Source) -> dict:
         "can_backfill": bool(
             spec and spec.url_template and source.type in NEWS_POLL_TYPES
         ),
+        "doc_count": cov.get("n") or 0,
     }
 
 
 def _history_fragment_response(source: Source) -> JsonResponse:
     """歷史回補按鈕不整頁跳轉——回傳這一列狀態欄／按鈕欄的最新 HTML，
     前端直接換掉對應的 <td>，並依 ``polling`` 決定要不要繼續輪詢。
+
+    篇數一起回傳：回補進行中時它會持續增加，這是「真的有在抓」最
+    直接的證據，只更新狀態文字看不出來。
     """
     row = _history_row_for(source)
     return JsonResponse({
+        "doc_count": row["doc_count"],
         "status_html": render_to_string("web/_history_status_cell.html", {"row": row}),
         "action_html": render_to_string("web/_history_action_cell.html", {"row": row}),
         "polling": bool(row["historical_running"] or row["historical_queued"]),
