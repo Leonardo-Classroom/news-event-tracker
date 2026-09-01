@@ -113,6 +113,42 @@ class TestIngestArchiveChunk:
         assert Document.objects.count() == 1
         assert second.created == 0 and second.updated == 1
 
+    def test_單頁抓取失敗不截斷整段回補(self, pts_source):
+        """暫時性網路錯誤與「真的沒有更多內容」都給空清單，但只有後者
+        代表走到盡頭。混為一談會讓一次失敗把回補截斷、還標成已完成。"""
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=TAIPEI))
+        fetcher = FakeFetcher({
+            "https://news.pts.org.tw/dailynews?page=1":
+                '<a href="/article/1">第一則</a>',
+            # page=2 未登記 → FakeFetcher 拋 FetchError（模擬暫時性失敗）
+            "https://news.pts.org.tw/dailynews?page=3":
+                '<a href="/article/3">第三則</a>',
+        })
+        mark_historical_started(pts_source, clock=clock)
+        result = ingest_archive_chunk(
+            pts_source, fetcher=fetcher, clock=clock, max_units=3)
+
+        # 第 2 頁失敗後仍走到第 3 頁，兩則都入庫
+        assert Document.objects.count() == 2
+        assert result.error == ""
+
+    def test_連續抓取失敗記為失敗而非完成(self, pts_source):
+        """站台真的掛掉時要停，但不能謊稱「已完成」——那會讓人以為
+        這個來源的歷史已經回補完畢。"""
+        clock = FixedClock(dt.datetime(2026, 8, 31, 12, tzinfo=TAIPEI))
+        fetcher = FakeFetcher({
+            "https://news.pts.org.tw/dailynews?page=1":
+                '<a href="/article/1">第一則</a>',
+        })                       # page=2 之後全部失敗
+        mark_historical_started(pts_source, clock=clock)
+        result = ingest_archive_chunk(
+            pts_source, fetcher=fetcher, clock=clock, max_units=10)
+
+        assert not result.ok
+        assert "連續" in result.error
+        pts_source.refresh_from_db()
+        assert pts_source.historical_status == STATUS_ERROR
+
     def test_分頁繞回首頁即停止(self, pts_source):
         page = """
         <a href="/article/1">德國南部飛機對撞</a>

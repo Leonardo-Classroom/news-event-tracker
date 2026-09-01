@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 HISTORICAL_STALE = dt.timedelta(minutes=30)
 #: 派工後一直沒有 cursor，多半是 worker 還在跑舊程式、不認得新任務。
 HISTORICAL_QUEUED_STALE = dt.timedelta(minutes=3)
+#: 連續抓不到幾頁就視為站台真的有問題、停止回補。
+#: 單頁失敗要往前走（可能只是暫時性錯誤），但不能無限往前走——
+#: 站台整個掛掉時，否則會一路空抓到 max_units。
+MAX_CONSECUTIVE_FETCH_FAILURES = 3
 STATUS_IDLE = "idle"
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
@@ -154,6 +158,8 @@ def ingest_archive_chunk(
               if source.historical_cursor else initial_cursor(spec))
     if spec.kind == KIND_DATE and cursor.date is None:
         cursor = initial_cursor(spec)
+    # 只在單次任務內累計：跨任務的短暫失敗不該累加成「站台掛了」。
+    consecutive_failures = 0
 
     try:
         while result.units < limit:
@@ -165,6 +171,7 @@ def ingest_archive_chunk(
                 break
 
             request = build_request(spec, cursor)
+            fetch_failed = False
             try:
                 raw = fetch_archive_page(fetcher, spec, request)
                 docs = parse_archive_documents(
@@ -173,12 +180,30 @@ def ingest_archive_chunk(
                 # 單日／單頁失敗往前走，不中斷整段回補。
                 logger.warning("歷史清單 %s %s：%s", source.slug, request.url, exc)
                 docs = []
+                fetch_failed = True
+
+            if fetch_failed:
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FETCH_FAILURES:
+                    # 記為失敗而非完成：我們並不知道是否真的走到盡頭，
+                    # 標成「已完成」會謊稱這個來源的歷史已經回補完畢。
+                    result.error = (
+                        f"連續 {consecutive_failures} 次抓取失敗，中止回補"
+                        f"（最後嘗試 {request.url}）"
+                    )
+                    _finish(source, clock.now(), STATUS_ERROR, result.error)
+                    return result
+            else:
+                consecutive_failures = 0
 
             docs = apply_archive_date(docs, spec, cursor)
             urls = [d.url for d in docs if d.url]
             fp = fingerprint_urls(urls) if urls else ""
 
-            if spec.kind in (KIND_PAGE, KIND_OFFSET) and not urls:
+            # 抓取失敗與「真的沒有更多內容」必須分開：兩者都給空清單，
+            # 但只有後者代表走到盡頭。混為一談會讓一次暫時性的網路錯誤
+            # 把整段回補截斷，而且還標成綠色的「已完成」。
+            if spec.kind in (KIND_PAGE, KIND_OFFSET) and not urls and not fetch_failed:
                 result.done = True
                 break
             if (spec.kind == KIND_PAGE and cursor.page > 1
