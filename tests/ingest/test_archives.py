@@ -6,7 +6,8 @@ from apps.ingest.archives import (
     TAIPEI, Cursor, advance_cursor, apply_archive_date,
     build_request, fingerprint_urls, get_archive_spec, initial_cursor,
     parse_archive_documents, parse_cna_json, parse_ltn_json,
-    parse_sitemap_xml, parse_twreporter_json, tagged_post_url,
+    parse_mirrormedia_graphql, parse_sitemap_xml, parse_twreporter_json,
+    tagged_post_url,
 )
 from apps.ingest.adapters import get_adapter
 from apps.ingest.adapters.base import ParsedDocument
@@ -48,14 +49,6 @@ def test_sitemap沒有標題不亂填():
     轉載歸併的 bigram 指紋與檢索。"""
     docs = parse_sitemap_xml(SITEMAP_SAMPLE, base_url="https://www.mirrormedia.mg")
     assert all(d.title == "" for d in docs)
-
-
-def test_鏡週刊改走sitemap不再是空路徑():
-    spec = get_archive_spec("mirrormedia")
-    assert spec.url_template.endswith("/rss/posts.xml")
-    assert spec.list_parser == "sitemap"
-    req = build_request(spec, Cursor(page=1))
-    assert req.url == "https://www.mirrormedia.mg/rss/posts.xml"
 
 
 def test_中央社POST帶分類與頁碼():
@@ -195,10 +188,38 @@ def test_HTML空頁在歷史路徑回空清單而非拋錯():
     assert docs == []
 
 
-def test_鏡週刊sitemap只有一頁不翻頁():
-    """2026-09-01 起改走 sitemap（原本判定為「無可用路徑」）。
-    sitemap 沒有分頁參數，max_units=1 讓走訪抓完就停。"""
+MIRRORMEDIA_GQL_SAMPLE = """{"data":{"posts":[
+  {"id":"349307","slug":"20260831-165inv-150728","title":"台北共樂軒睽違近百年跨海演出",
+   "publishedDate":"2026-09-01T04:00:00.000Z"},
+  {"id":"349300","slug":"20260901edi018","title":"傅崐萁鞠躬致歉",
+   "publishedDate":"2026-09-01T03:00:00.000Z"},
+  {"id":"1","slug":"","title":"沒有 slug 的要跳過","publishedDate":null}
+]}}"""
+
+
+def test_鏡週刊graphql解析出網址與時間():
+    docs = parse_mirrormedia_graphql(MIRRORMEDIA_GQL_SAMPLE)
+    assert len(docs) == 2          # 沒有 slug 的那筆要被跳過
+    assert docs[0].url == "https://www.mirrormedia.mg/story/20260831-165inv-150728"
+    assert docs[0].title == "台北共樂軒睽違近百年跨海演出"
+    assert docs[0].published_at is not None
+
+
+def test_鏡週刊改走graphql可深挖():
+    """原本判定「SPA、API 逾時、只能靠 RSS／sitemap」，實測前端無限
+    捲動打的 GraphQL 端點可用 skip 一路下探（343,149 篇、最舊 2016-09）。"""
     spec = get_archive_spec("mirrormedia")
-    assert spec is not None
-    assert spec.url_template
-    assert spec.max_units == 1
+    assert spec.graphql_query
+    assert spec.method == "POST"
+    req = build_request(spec, Cursor(offset=200))
+    assert req.body["variables"]["skip"] == 200
+    assert req.body["variables"]["take"] == spec.pagesize
+
+
+def test_offset步長等於單次取回筆數():
+    """步長與 take 不一致會重複抓或整段跳過。原本寫死 50，
+    只對報導者正確。"""
+    for slug in ("twreporter", "mirrormedia"):
+        spec = get_archive_spec(slug)
+        nxt = advance_cursor(spec, Cursor(offset=0))
+        assert nxt.offset == spec.pagesize, slug

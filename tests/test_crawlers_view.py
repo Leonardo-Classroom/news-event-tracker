@@ -118,11 +118,11 @@ class TestCrawlersView:
         html = admin_client.get("/crawlers/").content.decode()
         assert "2016-07-01" in html
         assert "2026-08-31" in html
-        assert "歷史回補" in html          # 連到獨立頁面的連結
+        assert "全站掃描" in html          # 連到獨立頁面的連結
         assert "最舊" in html and "最新" in html
 
-    def test_歷史回補獨立頁顯示執行狀態(self, admin_client, crawl_source):
-        """任務拆解 61：歷史回補搬到獨立頁面，仍要看得到執行狀態。"""
+    def test_全站掃描獨立頁顯示執行狀態(self, admin_client, crawl_source):
+        """任務拆解 61：全站掃描搬到獨立頁面，仍要看得到執行狀態。"""
         html = admin_client.get("/crawlers/history/").content.decode()
         assert crawl_source.name in html
         assert "執行狀態" in html
@@ -145,7 +145,7 @@ class TestCrawlersView:
         assert "2020-03-05" in html
         assert "資料庫內最早" in html
 
-    def test_歷史回補會派工且不跳轉(self, admin_client, db):
+    def test_全站掃描會派工且不跳轉(self, admin_client, db):
         """按鈕留在原頁——回傳這一列的狀態片段，不是整頁 redirect。"""
         source = Source.objects.create(
             slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
@@ -162,8 +162,8 @@ class TestCrawlersView:
         assert "已派工" in data["status_html"]
         assert data["polling"] is True
 
-    def test_歷史回補頁顯示篇數且輪詢會更新(self, admin_client, db):
-        """回補進行中篇數會一直增加，只更新狀態文字看不出有沒有在動。"""
+    def test_全站掃描頁顯示篇數且輪詢會更新(self, admin_client, db):
+        """掃描進行中篇數會一直增加，只更新狀態文字看不出有沒有在動。"""
         from apps.ingest.models import ContentClass, Document
 
         source = Source.objects.create(
@@ -196,7 +196,7 @@ class TestCrawlersView:
         assert "已完成" in data["status_html"]
         assert data["polling"] is False
 
-    def test_有進度cursor時顯示回補中(self, admin_client, db):
+    def test_有進度cursor時顯示掃描中(self, admin_client, db):
         Source.objects.create(
             slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,
             base_url="https://udn.com",
@@ -205,16 +205,16 @@ class TestCrawlersView:
             historical_updated_at=dt.datetime.now(UTC),
         )
         html = admin_client.get("/crawlers/history/").content.decode()
-        assert "回補中" in html
+        assert "掃描中" in html
         assert "2016-07-15" in html
 
-    def test_歷史回補要求POST(self, admin_client, crawl_source):
+    def test_全站掃描要求POST(self, admin_client, crawl_source):
         with patch("apps.web.views.dispatch_historical") as mocked:
             response = admin_client.get(f"/crawlers/{crawl_source.slug}/history/")
         mocked.assert_not_called()
         assert response.status_code == 405
 
-    def test_進行中的歷史回補不重複派工(self, admin_client, db):
+    def test_進行中的全站掃描不重複派工(self, admin_client, db):
         """又點一次不是錯誤——只是沒有新效果，仍回傳目前狀態片段。"""
         source = Source.objects.create(
             slug="udn", name="聯合新聞網", type=SourceType.NEWS_SCRAPE,

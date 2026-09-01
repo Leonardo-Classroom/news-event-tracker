@@ -1,29 +1,29 @@
 {% extends "web/base.html" %}
-{% block title %}歷史回補{% endblock %}
+{% block title %}全站掃描{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>歷史回補</h1>
-  <span class="sub">從古至今回補各媒體歷史語料——<a href="{% url 'web:crawlers' %}">回排程設定</a></span>
+  <h1>全站掃描</h1>
+  <span class="sub">把各媒體的清單從頭掃過一遍——<a href="{% url 'web:crawlers' %}">回排程設定</a></span>
 </div>
 
 <div class="card">
   <div class="body">
     <p style="color:var(--text-2);margin:0 0 12px">
-      即時輪詢只抓當天清單或最新一頁。這裡改走各站歷史日檔／分頁／API
-      回補更久以前的內容，但兩種走法方向不同：<b>日期型</b>站台（聯合、
-      ETtoday）從站台還能翻到的最早日期，一路掃到今天；<b>分頁／offset
-      型</b>站台（中央社、自由時報、公視、工商、報導者）方向相反——
-      從最新（第一頁／offset 0）開始往回翻，翻到清單變空、翻頁繞回
-      第一頁、或碰到單一來源的頁數上限為止，因為無法事先知道站台
-      總共有幾頁。每個媒體一條獨立任務，fetch 佇列最多 8 條同時跑，
-      邊抓邊寫入資料庫。寫入是 upsert，可重複觸發。回補不計入來源
-      健康度。Celery worker 不會隨程式碼自動重載，新增任務後若顯示
-      「已派工」但篇數不動，需要重啟 worker。
+      即時輪詢只抓當天清單或最新一頁。這裡把各站的清單<b>從頭掃過一遍</b>，
+      掃到端點給不出更多資料為止。已經收錄過的網址仍會被掃到，但寫入是
+      upsert，不會產生重複，所以可以隨時重跑。
+      兩種走法方向不同：<b>日期型</b>站台（聯合、ETtoday）從站台最早的
+      日期一路掃到今天；<b>分頁／offset 型</b>站台（中央社、自由時報、
+      公視、工商、報導者、鏡週刊）方向相反——從最新往回翻，翻到清單變空、
+      繞回第一頁、或碰到該來源的頁數上限為止，因為無法事先知道總共有幾頁。
+      每個媒體一條獨立任務，fetch 佇列最多 8 條同時跑，邊抓邊寫入。
+      掃描不計入來源健康度。Celery worker 不會隨程式碼自動重載，新增任務
+      後若顯示「已派工」但篇數不動，需要重啟 worker。
     </p>
     <form method="post" action="{% url 'web:crawler_history_all' %}"
-          onsubmit="return confirm('將派發所有新聞來源的歷史回補，可能跑數小時到數天。確定？')">
+          onsubmit="return confirm('將對所有新聞來源做全站掃描，可能跑數小時到數天。確定？')">
       {% csrf_token %}
-      <button class="btn primary">全部新聞來源從古至今回補</button>
+      <button class="btn primary">全部新聞來源全站掃描</button>
     </form>
   </div>
 </div>
@@ -60,9 +60,9 @@
 
 <script>
 (function() {
-  // 點「歷史回補」不整頁跳轉／不整頁重新整理——用 fetch 送出，
+  // 點「全站掃描」不整頁跳轉／不整頁重新整理——用 fetch 送出，
   // 拿回這一列狀態欄與按鈕欄的最新 HTML 直接換掉，派工後立刻看到
-  // 「已派工／回補中」，並自動輪詢到完成或失敗為止才停止。
+  // 「已派工／掃描中」，並自動輪詢到完成或失敗為止才停止。
   var timers = {};
 
   function updateRow(slug, data) {
@@ -70,7 +70,7 @@
     if (!row) return;
     row.querySelector(".history-status").innerHTML = data.status_html;
     row.querySelector(".history-action").innerHTML = data.action_html;
-    // 篇數在回補進行中會一直增加，是「真的有在抓」最直接的證據
+    // 篇數在掃描進行中會一直增加，是「真的有在抓」最直接的證據
     row.querySelector(".history-count").textContent = data.doc_count;
     bindTriggerForm(row.querySelector(".history-trigger-form"));
     if (data.polling) {

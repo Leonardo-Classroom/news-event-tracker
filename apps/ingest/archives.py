@@ -31,9 +31,14 @@
   相同的 35 篇。分頁是裝飾用的，實際只有一頁。
 - **公視的 2011-08-02 是最早的文章 ID，不是清單能翻到的最早**，
   當成 ``earliest`` 會在 UI 顯示一個實際到不了的日期。
-- **鏡週刊可以爬**：robots.txt 露出的 ``/rss/posts.xml`` 是純
-  HTTP 的 sitemap，1500 筆／約 10 天，是 RSS 的兩個數量級。
-  SPA 的 API 仍逾時，但根本不需要走它。
+- **鏡週刊可以爬，而且能挖到底**：站台的無限捲動實際上是打
+  ``adam-weekly-api-server-prod-…run.app/content/graphql``
+  （Keystone GraphQL，前端捲動時每個訪客的瀏覽器都打這個），
+  ``take``／``skip`` 可一路下探——實測 343,149 篇、最舊
+  2016-09-29（創站）。**不需要模擬瀏覽器捲動**。
+  端點與查詢是從 ``/_next/static/chunks/pages/section/[slug]*.js``
+  讀出來的；sitemap（1500 筆／10 天）與 RSS（20 餘筆）相形之下
+  都只是近況，已不再使用。
 
 歷史回補不寫入 ``Source.consecutive_failures``——那是即時輪詢的
 健康度，兩者混在一起會讓「立即爬取」被歷史空頁毒掉。
@@ -62,6 +67,16 @@ PARSER_CNA = "cna"
 PARSER_LTN = "ltn"
 PARSER_TWREPORTER = "twreporter"
 PARSER_SITEMAP = "sitemap"
+PARSER_MIRRORMEDIA = "mirrormedia"
+
+#: 鏡週刊前端無限捲動實際打的查詢（Keystone GraphQL）。
+#: ``skip`` 可以一路下探——實測 skip=343140 仍取得 2016-09-29 的文章。
+MIRRORMEDIA_GQL = (
+    "query($take:Int,$skip:Int!,$where:PostWhereInput!){"
+    "posts(take:$take,skip:$skip,where:$where,"
+    "orderBy:[{publishedDate:desc}])"
+    "{id slug title publishedDate}}"
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +90,9 @@ class ArchiveSpec:
     earliest: dt.date | None = None
     adapter_slug: str = ""
     list_parser: str = ""
+    #: GraphQL 查詢字串。設了就以 ``{take, skip}`` 組 POST body
+    #: （見 ``build_request``），``url_template`` 不帶任何佔位符。
+    graphql_query: str = ""
     method: str = "GET"
     date_format: str = "%Y%m%d"
     chunk_size: int = 30
@@ -219,16 +237,22 @@ ARCHIVE_SPECS: dict[str, ArchiveSpec] = {
         url_template="https://go-api.twreporter.org/v2/posts?offset={offset}&limit=50",
         earliest=dt.date(2015, 12, 14),
         list_parser=PARSER_TWREPORTER, chunk_size=4, max_units=200,
+        # 必須與網址裡的 limit=50 一致：advance_cursor 用 pagesize 當步長
+        pagesize=50,
         note="go-api /v2/posts 可走完整庫，實測 5922 篇、最早 2015-12-14",
     ),
     "mirrormedia": _spec(
-        slug="mirrormedia", kind=KIND_PAGE,
-        url_template="https://www.mirrormedia.mg/rss/posts.xml",
-        earliest=None, list_parser=PARSER_SITEMAP,
-        chunk_size=1, max_units=1,
-        note="sitemap posts.xml 實測 1500 篇、約 10 天（RSS 只有 20 餘篇）。"
-             "SPA 的 /api/v2/posts 仍逾時，但 sitemap 純 HTTP 可取。"
-             "無分頁參數，站台不提供更早的清單",
+        slug="mirrormedia", kind=KIND_OFFSET,
+        url_template=(
+            "https://adam-weekly-api-server-prod-ufaummkd5q-de.a.run.app"
+            "/content/graphql"
+        ),
+        earliest=dt.date(2016, 9, 29),
+        list_parser=PARSER_MIRRORMEDIA, graphql_query=MIRRORMEDIA_GQL,
+        method="POST", pagesize=100, chunk_size=20, max_units=4000,
+        note="無限捲動的 GraphQL（skip 可深挖）：實測 343,149 篇、"
+             "最舊 2016-09-29。這是前端捲動時實際打的端點，"
+             "不需要模擬瀏覽器",
     ),
 }
 
@@ -272,6 +296,15 @@ def build_request(spec: ArchiveSpec, cursor: Cursor) -> ArchiveRequest:
             "{date}", cursor.date.strftime(spec.date_format))
         return ArchiveRequest(url=url)
     if spec.kind == KIND_OFFSET:
+        if spec.graphql_query:
+            return ArchiveRequest(url=spec.url_template, body={
+                "query": spec.graphql_query,
+                "variables": {
+                    "take": spec.pagesize,
+                    "skip": cursor.offset,
+                    "where": {"state": {"equals": "published"}},
+                },
+            })
         url = spec.url_template.replace("{offset}", str(cursor.offset))
         return ArchiveRequest(url=url)
     url = spec.url_template.replace("{page}", str(cursor.page))
@@ -306,7 +339,9 @@ def advance_cursor(spec: ArchiveSpec, cursor: Cursor) -> Cursor:
     if spec.kind == KIND_DATE and nxt.date is not None:
         nxt.date = nxt.date + dt.timedelta(days=1)
     elif spec.kind == KIND_OFFSET:
-        nxt.offset += 50
+        # 步長必須等於單次取回的筆數，否則會重複抓（步長太小）
+        # 或整段跳過（步長太大）。原本寫死 50，只對報導者正確。
+        nxt.offset += spec.pagesize
     else:
         nxt.page += 1
     return nxt
@@ -413,6 +448,25 @@ def parse_twreporter_json(raw: str, *, base_url: str = "") -> list[ParsedDocumen
     return docs
 
 
+def parse_mirrormedia_graphql(raw: str, *, base_url: str = "") -> list[ParsedDocument]:
+    """鏡週刊 GraphQL 的 ``posts``。文章網址由 slug 組出。"""
+    data = json.loads(raw)
+    posts = ((data.get("data") or {}).get("posts")) or []
+    docs: list[ParsedDocument] = []
+    for item in posts:
+        slug = (item.get("slug") or "").strip()
+        title = (item.get("title") or "").strip()
+        if not slug:
+            continue
+        docs.append(ParsedDocument(
+            url=f"https://www.mirrormedia.mg/story/{slug}",
+            title=title,
+            published_at=parse_datetime(item.get("publishedDate")),
+            external_id=str(item.get("id") or "")[:128],
+        ))
+    return docs
+
+
 def parse_sitemap_xml(raw: str, *, base_url: str = "") -> list[ParsedDocument]:
     """sitemap.xml 的 ``<url><loc>`` 清單。
 
@@ -464,6 +518,7 @@ _LIST_PARSERS = {
     PARSER_LTN: parse_ltn_json,
     PARSER_TWREPORTER: parse_twreporter_json,
     PARSER_SITEMAP: parse_sitemap_xml,
+    PARSER_MIRRORMEDIA: parse_mirrormedia_graphql,
 }
 
 

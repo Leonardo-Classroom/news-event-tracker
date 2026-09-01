@@ -668,7 +668,7 @@ def crawler_history_all(request):
     if dispatched:
         messages.success(
             request,
-            f"已派發 {len(dispatched)} 個來源的歷史回補：{'、'.join(dispatched)}",
+            f"已派發 {len(dispatched)} 個來源的全站掃描：{'、'.join(dispatched)}",
         )
     if skipped:
         messages.error(

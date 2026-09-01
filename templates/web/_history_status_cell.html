@@ -1,4 +1,4 @@
-{% if row.historical_running and row.historical_cursor %}<span class="tag accent">回補中</span>
+{% if row.historical_running and row.historical_cursor %}<span class="tag accent">掃描中</span>
   <div style="font-size:11px;color:var(--text-3);margin-top:2px">進度 {{ row.historical_cursor }}　篇數會隨抓取增加</div>
 {% elif row.historical_running or row.historical_queued %}<span class="tag warn">已派工</span>
   <div style="font-size:11px;color:var(--text-3);margin-top:2px">worker 尚未接手；若超過數分鐘篇數仍不變，需重啟 Celery</div>
