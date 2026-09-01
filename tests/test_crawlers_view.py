@@ -127,6 +127,24 @@ class TestCrawlersView:
         assert crawl_source.name in html
         assert "執行狀態" in html
 
+    def test_站台無法得知範圍時退回資料庫內最早日期(self, admin_client, db):
+        """中央社的 WNewsList 沒有日期參數，站台可回溯永遠未知，
+        但資料庫裡已經有的文章日期仍是有用資訊，不該只顯示「—」。"""
+        from apps.ingest.models import ContentClass, Document
+
+        source = Source.objects.create(
+            slug="cna-society", name="中央社－社會", type=SourceType.NEWS_SCRAPE,
+            base_url="https://www.cna.com.tw",
+        )
+        Document.objects.create(
+            source=source, url="https://www.cna.com.tw/news/asoc/old.aspx",
+            title="舊聞", content_class=ContentClass.COPYRIGHTED,
+            published_at=dt.datetime(2020, 3, 5, tzinfo=UTC),
+        )
+        html = admin_client.get("/crawlers/history/").content.decode()
+        assert "2020-03-05" in html
+        assert "資料庫內最早" in html
+
     def test_歷史回補會派工且不跳轉(self, admin_client, db):
         """按鈕留在原頁——回傳這一列的狀態片段，不是整頁 redirect。"""
         source = Source.objects.create(
