@@ -32,6 +32,18 @@ def env_bool(key: str, default: bool = False) -> bool:
 SECRET_KEY = env("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = [h for h in env("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h]
+CSRF_TRUSTED_ORIGINS = [o for o in env("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o]
+
+# 對外公開時的加固。DJANGO_BEHIND_HTTPS_PROXY 預設關閉——實際連線
+# 方式尚未確認是否真的有 TLS（見與使用者的討論），若在沒有 HTTPS
+# 的情況下打開 SESSION_COOKIE_SECURE／SECURE_SSL_REDIRECT，瀏覽器會
+# 直接拒發 cookie 或造成無窮重導，等於把整個對外服務打掛。確認前端
+# 真的有 TLS 之後，把這個環境變數設 True 再啟用。
+if not DEBUG and env_bool("DJANGO_BEHIND_HTTPS_PROXY", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
 
 INSTALLED_APPS = [
     "django.contrib.admin",

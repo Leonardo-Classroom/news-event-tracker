@@ -85,7 +85,11 @@ start_web() {
     ok "Django 已在執行（port $PORT）"
     return
   fi
-  nohup python manage.py runserver "0.0.0.0:$PORT" \
+  # --insecure：DEBUG=False 後 runserver 預設不再自動serve靜態檔，
+  # 對外公開時 DJANGO_DEBUG 必須是 False（見 config/settings.py），
+  # 沒這個旗標 CSS/JS 會全部 404。正式規模更大時應換成真正的靜態
+  # 檔伺服器，目前單機自架先用這個內建旗標。
+  nohup python manage.py runserver "0.0.0.0:$PORT" --insecure \
     > "$LOGDIR/django.log" 2>&1 &
   echo $! > "$PIDFILE"
   for _ in $(seq 1 20); do
@@ -156,7 +160,7 @@ case "${1:-start}" in
   web)
     # 前景執行，可直接看到即時日誌與 traceback
     conda activate "$APP_ENV"
-    exec python manage.py runserver "0.0.0.0:$PORT"
+    exec python manage.py runserver "0.0.0.0:$PORT" --insecure
     ;;
   restart)  stop_all; sleep 3; "$0" start ;;
   *)
