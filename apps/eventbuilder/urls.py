@@ -10,6 +10,7 @@ urlpatterns = [
     path("trash/", views.trash, name="trash"),
     path("c/<int:pk>/", views.builder, name="conversation"),
     path("c/<int:pk>/send/", views.post_message, name="send"),
+    path("c/<int:pk>/pending/", views.pending_reply, name="pending"),
     path("c/<int:pk>/rename/", views.rename_conversation, name="rename"),
     path("c/<int:pk>/trash/", views.trash_conversation, name="trash_conversation"),
     path("c/<int:pk>/restore/", views.restore_conversation, name="restore"),

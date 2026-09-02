@@ -54,7 +54,9 @@
         {% endfor %}
       </div>
       <form class="eb-input" id="send-form"
-            data-url="{% url 'eventbuilder:send' conversation.pk %}">
+            data-url="{% url 'eventbuilder:send' conversation.pk %}"
+            data-pending-url="{% url 'eventbuilder:pending' conversation.pk %}"
+            data-awaiting="{% if awaiting_reply %}1{% endif %}">
         {% csrf_token %}
         <textarea name="text" rows="2" placeholder="說說你想追蹤什麼案件…（Enter 送出，Shift+Enter 換行）"></textarea>
         <button class="btn primary">送出</button>
@@ -304,6 +306,45 @@
   }
   bindSugs();
   if (msgs) msgs.scrollTop = msgs.scrollHeight;
+
+  // ── 重整後接回還在生成中的回覆 ────────────────────────────
+  // 使用者的訊息在呼叫模型前就寫入，伺服器端即使斷線也會跑完並存下
+  // 回覆（實測斷線 45 秒後訊息確實在）。所以刷新不會弄丟答案，只是
+  // 頁面停在「有問題、沒回答」的畫面——這裡把它接回來。
+  if (form.dataset.awaiting === "1") {
+    var waiting = bubble("assistant pending", "");
+    textOf(waiting).innerHTML =
+      '<span class="dots"><i></i><i></i><i></i></span>' +
+      '<span class="dots-note">剛才的回覆還在生成，稍候會自動出現</span>';
+    button.disabled = true;
+
+    // 逾時上限：若那次請求隨伺服器重啟而中斷，回覆永遠不會來，
+    // 不能無限輪詢。
+    var deadline = Date.now() + 180000;
+    var timer = setInterval(function() {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        button.disabled = false;
+        textOf(waiting).textContent = "這則回覆沒有完成，請再問一次";
+        waiting.className = "msg assistant error";
+        return;
+      }
+      fetch(form.dataset.pendingUrl)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d || !d.ready) return;
+          clearInterval(timer);
+          button.disabled = false;
+          waiting.className = "msg assistant";
+          typeInto(waiting, d.reply, d.cited_html);
+          sugs.innerHTML = d.suggestions_html;
+          bindSugs();
+          var active = document.querySelector(".eb-conv.on a");
+          if (active && d.title) active.textContent = d.title;
+        })
+        .catch(function() { /* 暫時性失敗，下一輪再試 */ });
+    }, 3000);
+  }
 })();
 </script>
 {% endblock %}

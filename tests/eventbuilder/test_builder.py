@@ -445,3 +445,52 @@ class TestRetrievalContext:
                          provider=FakeProvider([TURN, "標題"]))
         used = mocked.call_args[0][0]
         assert "柯文哲京華城案" in used
+
+
+@pytest.mark.medium
+class TestResumeAfterRefresh:
+    """刷新不會弄丟回覆：使用者訊息在呼叫模型前就寫入，伺服器端即使
+    在瀏覽器斷線後也會跑完並存檔（實測斷線 45 秒後訊息確實在）。
+    缺的只是頁面不知道有一則正在路上。"""
+
+    def test_有問題沒回答時頁面標記等待中(self, client, user, conversation):
+        client.force_login(user)
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="京華城進度？")
+        html = client.get(f"/build/c/{conversation.pk}/").content.decode()
+        assert 'data-awaiting="1"' in html
+
+    def test_回答完成後不再標記等待(self, client, user, conversation):
+        client.force_login(user)
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="問")
+        Message.objects.create(conversation=conversation, role=Role.ASSISTANT,
+                               content="答")
+        html = client.get(f"/build/c/{conversation.pk}/").content.decode()
+        assert 'data-awaiting="1"' not in html
+
+    def test_輪詢端點在未完成時回ready_false(self, client, user, conversation):
+        client.force_login(user)
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="問")
+        r = client.get(f"/build/c/{conversation.pk}/pending/")
+        assert r.json()["ready"] is False
+
+    def test_輪詢端點在完成後回內容(self, client, user, conversation):
+        client.force_login(user)
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="問")
+        Message.objects.create(conversation=conversation, role=Role.ASSISTANT,
+                               content="京華城案二審已開庭")
+        d = client.get(f"/build/c/{conversation.pk}/pending/").json()
+        assert d["ready"] is True
+        assert d["reply"] == "京華城案二審已開庭"
+        assert "suggestions_html" in d
+
+    def test_輪詢端點看不到別人的對話(self, client, conversation,
+                                      django_user_model):
+        other = django_user_model.objects.create_user("nosy", password="x")
+        client.force_login(other)
+        r = client.get(f"/build/c/{conversation.pk}/pending/")
+        assert r.status_code == 404
+        assert r.json()["stale"] is True

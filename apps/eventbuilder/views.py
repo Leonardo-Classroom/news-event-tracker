@@ -12,6 +12,9 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from apps.eventbuilder.models import Conversation, EventSuggestion
+# 訊息角色與權限層級都叫 Role，後匯入者會蓋掉前者——用別名區分，
+# 不靠匯入順序（那會在有人重排 import 時無聲壞掉）。
+from apps.eventbuilder.models import Role as MessageRole
 from apps.eventbuilder.service import create_event_from, default_title, send_message
 from apps.web.permissions import Role, require_role
 
@@ -32,11 +35,14 @@ def _with_citations(conversation):
 
 
 def _context(request, conversation=None):
+    messages = _with_citations(conversation)
     return {
         "nav": "eventbuilder",
         "conversations": _owned(request).alive(),
         "conversation": conversation,
-        "messages_list": _with_citations(conversation),
+        "messages_list": messages,
+        # 最後一則是使用者的 → 回覆還在生成（或那次請求已死）。
+        "awaiting_reply": bool(messages and messages[-1].role == MessageRole.USER),
         "suggestions": (list(conversation.suggestions.alive()
                              .select_related("created_event"))
                         if conversation else []),
@@ -88,6 +94,37 @@ def post_message(request, pk: int):
         "cited_html": render_to_string(
             "eventbuilder/_cited.html",
             {"documents": result.documents}, request=request),
+        "suggestions_html": render_to_string(
+            "eventbuilder/_suggestions.html",
+            {"suggestions": list(conversation.suggestions.alive()
+                                 .select_related("created_event"))},
+            request=request),
+    })
+
+
+@require_role(Role.USER)
+def pending_reply(request, pk: int):
+    """重整後用來接回「還在生成中」的那一則回覆。
+
+    **回覆不會因為刷新而遺失**：使用者的訊息在呼叫模型前就寫入，
+    伺服器端即使在瀏覽器斷線後也會跑完並存下 AI 的回覆（實測斷線
+    45 秒後訊息確實存在）。缺的只是頁面不知道有一則正在路上——
+    重整後就停在「有問題、沒回答」的畫面，看起來像丟失了。
+    """
+    conversation = _owned(request).alive().filter(pk=pk).first()
+    if conversation is None:
+        return JsonResponse({"stale": True}, status=404)
+    last = conversation.messages.order_by("created_at", "id").last()
+    if last is None or last.role != MessageRole.ASSISTANT:
+        return JsonResponse({"ready": False})
+    return JsonResponse({
+        "ready": True,
+        "reply": last.content,
+        "title": conversation.title,
+        "cited_html": render_to_string(
+            "eventbuilder/_cited.html",
+            {"documents": list(last.documents.select_related("source"))},
+            request=request),
         "suggestions_html": render_to_string(
             "eventbuilder/_suggestions.html",
             {"suggestions": list(conversation.suggestions.alive()
