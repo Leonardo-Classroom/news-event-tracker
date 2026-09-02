@@ -28,6 +28,7 @@ class FakeProvider:
             text = value if isinstance(value, str) else json.dumps(value,
                                                                    ensure_ascii=False)
             finish_reason = "stop"
+            output_tokens = 0
 
             def json(self):
                 return json.loads(self.text)
@@ -341,18 +342,41 @@ class TestMalformedResponse:
         assert "格式異常" in result.error
         assert "Expecting value" not in result.error
 
-    def test_撞上max_tokens時明說被截斷(self, conversation):
-        """finish_reason=length 的截斷 JSON 表面上就是「解析失敗」，
-        會把問題指向錯誤的方向。"""
+    def test_撞上max_tokens仍先嘗試救回reply(self, conversation):
+        """推理內容會計入 completion_tokens 卻不在 content 裡（實測
+        out_tok=3911 但 JSON 只有 419 字元），因此撞上限時 reply 往往
+        還是完整的——先救再說。"""
         class Truncated(FakeProvider):
             def complete(self, **kwargs):
                 r = super().complete(**kwargs)
                 r.finish_reason = "length"
+                r.output_tokens = 8192
                 return r
 
+        broken = '{"reply":"京華城案二審已開庭。","suggestions":[],'
         result = send_message(conversation, "問題",
-                              provider=Truncated(['{"reply":"半句']))
-        assert "截斷" in result.error
+                              provider=Truncated([broken, "標題"]))
+        assert result.error == ""
+        assert result.reply == "京華城案二審已開庭。"
+
+    def test_撞上上限且救不回時不怪使用者(self, conversation):
+        """原本寫「請把問題描述得更聚焦一些」是錯的建議——真正的原因
+        是推理吃掉了額度，不是使用者問得太廣。"""
+        class Truncated(FakeProvider):
+            def complete(self, **kwargs):
+                r = super().complete(**kwargs)
+                r.finish_reason = "length"
+                r.output_tokens = 8192
+                return r
+
+        result = send_message(conversation, "問題", provider=Truncated(["半句"]))
+        assert "再試一次" in result.error
+        assert "聚焦" not in result.error
+
+    def test_給足輸出額度(self, conversation):
+        provider = FakeProvider([TURN, "標題"])
+        send_message(conversation, "問題", provider=provider)
+        assert provider.calls[0]["max_tokens"] >= 8192
 
 
 @pytest.mark.medium

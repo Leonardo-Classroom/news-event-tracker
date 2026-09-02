@@ -209,6 +209,13 @@ def _candidate_block(documents: list[Document]) -> str:
 #: 重試太多次只是把使用者的等待時間拉長。
 _RETRIES = 1
 
+#: 輸出額度。**推理內容會計入 completion_tokens 但不在 content 裡**
+#: ——2026-09-03 實測：一次回答 out_tok=3911，其中真正的 JSON 只有
+#: 419 字元（約 400 token），其餘 3,500 都是推理。預設的 4096 幾乎
+#: 剛好用完，只要多想一點就撞上限、JSON 被切一半，表面上看起來就是
+#: 「解析失敗」。8192 讓推理有足夠空間。
+_MAX_TOKENS = 8192
+
 #: 從截斷的 JSON 裡救出 reply。實測失敗案例中 reply 本身是完整的，
 #: 只有後面的欄位被切掉——與其整輪失敗，不如至少把話講完。
 _REPLY_RE = re.compile(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"')
@@ -222,6 +229,7 @@ def _ask(provider, messages) -> tuple[dict | None, str]:
             response = provider.complete(
                 messages=messages, purpose=LlmPurpose.EVENT_SUMMARY,
                 json_schema=_SCHEMA, temperature=0.3,
+                max_tokens=_MAX_TOKENS,
                 task_name="eventbuilder.turn",
             )
         except LlmError as exc:
@@ -236,7 +244,15 @@ def _ask(provider, messages) -> tuple[dict | None, str]:
         # 表面上看起來就是「解析失敗」，會把問題指向錯誤的方向
         # （LlmResponse.finish_reason 的註解已經警告過這件事）。
         if response.finish_reason == "length":
-            last = "回應過長被截斷，請把問題描述得更聚焦一些"
+            # 已經給到 _MAX_TOKENS 還撞上限，代表這一題的推理量
+            # 異常大。這不是使用者的錯，別叫他改問法。
+            logger.warning("輸出撞上 max_tokens=%d（out_tok=%d）",
+                           _MAX_TOKENS, response.output_tokens)
+            salvaged = _salvage_reply(response.text)
+            if salvaged:
+                return {"reply": salvaged, "suggestions": [],
+                        "documents": []}, ""
+            last = "這次回覆超出長度上限，請再試一次"
             break
 
         salvaged = _salvage_reply(response.text)
