@@ -230,6 +230,11 @@ def upsert_parsed_documents(source: Source, parsed, now) -> tuple[int, int, int]
         # 同 published_at 的理由：重跑時會把內頁補回來的標題抹掉。
         if doc.title:
             defaults["title"] = doc.title[:512]
+        # 少數來源在清單階段就有完整內容、沒有另外的內文頁可抓
+        # （採購網公告）。同樣只在有值時寫入，否則會把內頁補齊的
+        # 全文抹掉。
+        if doc.body:
+            defaults["raw_body"] = doc.body
         with transaction.atomic():
             _, was_created = Document.objects.update_or_create(
                 url=doc.url, defaults=defaults)

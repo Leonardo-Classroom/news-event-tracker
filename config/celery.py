@@ -39,6 +39,13 @@ app.conf.beat_schedule = {
         "schedule": 3600.0,         # 每小時歸併轉載
         "options": {"queue": "fetch"},
     },
+    # 採購網是查詢驅動（拿事件去問），不是訂閱最新，因此頻率可低。
+    # 標案公告的變動遠慢於新聞。
+    "check-procurement": {
+        "task": "apps.events.tasks.check_procurement",
+        "schedule": 86400.0,        # 每日一次
+        "options": {"queue": "fetch"},
+    },
     "check-official-records": {
         "task": "apps.events.tasks.check_official_records",
         # 任務 27：active／dormant 事件的官方源檢查頻率皆為每日一次，

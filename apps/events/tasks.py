@@ -64,3 +64,28 @@ def check_official_records(force: bool = False) -> dict:
     數分鐘（實測 270MB 在正常頻寬下約 1-2 分鐘），加上可能查兩個月份。
     """
     return run_official_check(force=force)
+
+
+@shared_task(
+    name="apps.events.tasks.check_procurement",
+    queue="fetch",
+    acks_late=True,
+    soft_time_limit=900,
+    time_limit=960,
+)
+def check_procurement(dry_run: bool = False) -> dict:
+    """對追蹤中的事件查政府採購網（任務 55）。
+
+    查詢驅動而非全量入庫——採購網有數百萬筆標案，相關的是極少數。
+    冪等：寫入走 upsert。
+    """
+    from apps.events.procurement_check import check_events
+
+    summary = check_events(dry_run=dry_run)
+    return {
+        "events_checked": summary.events_checked,
+        "queries": summary.queries,
+        "hits": summary.hits,
+        "created": summary.created,
+        "updated": summary.updated,
+    }
