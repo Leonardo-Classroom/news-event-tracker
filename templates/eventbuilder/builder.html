@@ -1,0 +1,161 @@
+{% extends "web/base.html" %}
+{% block title %}建立事件{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>建立事件</h1>
+  <span class="sub">用自然語言跟 AI 討論要追蹤什麼案件，右側會累積候選事件</span>
+</div>
+
+<div class="eb">
+  {# ── 左：對話清單 ── #}
+  <aside class="eb-list">
+    <form method="post" action="{% url 'eventbuilder:new' %}">
+      {% csrf_token %}
+      <button class="btn primary eb-new">＋ 建立新對話</button>
+    </form>
+
+    <div class="eb-convs">
+      {% for c in conversations %}
+        <div class="eb-conv {% if conversation and c.pk == conversation.pk %}on{% endif %}">
+          <a href="{% url 'eventbuilder:conversation' c.pk %}">{{ c.title }}</a>
+          <details class="eb-menu">
+            <summary title="更多">⋯</summary>
+            <div class="eb-pop">
+              <form method="post" action="{% url 'eventbuilder:rename' c.pk %}">
+                {% csrf_token %}
+                <input name="title" value="{{ c.title }}" maxlength="128" aria-label="對話名稱">
+                <button class="btn">改名</button>
+              </form>
+              <form method="post" action="{% url 'eventbuilder:trash_conversation' c.pk %}">
+                {% csrf_token %}
+                <button class="btn danger-btn">移到回收桶</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      {% empty %}
+        <p class="empty">還沒有對話</p>
+      {% endfor %}
+    </div>
+
+    <a class="eb-trash" href="{% url 'eventbuilder:trash' %}">🗑 回收桶</a>
+  </aside>
+
+  {# ── 中：對話 ── #}
+  <section class="eb-chat">
+    {% if conversation %}
+      <div class="eb-msgs" id="msgs">
+        {% for m in messages_list %}
+          <div class="msg {{ m.role }}">{{ m.content|linebreaksbr }}</div>
+        {% empty %}
+          <p class="empty">描述你想追蹤的案件——例如「我想追蹤新竹棒球場的弊案進度」。</p>
+        {% endfor %}
+      </div>
+      <form class="eb-input" id="send-form"
+            data-url="{% url 'eventbuilder:send' conversation.pk %}">
+        {% csrf_token %}
+        <textarea name="text" rows="2" placeholder="說說你想追蹤什麼案件…（Enter 送出，Shift+Enter 換行）"></textarea>
+        <button class="btn primary">送出</button>
+      </form>
+    {% else %}
+      <div class="eb-msgs"><p class="empty">先按左上角「建立新對話」。</p></div>
+    {% endif %}
+  </section>
+
+  {# ── 右：候選事件 ── #}
+  <aside class="eb-sugs">
+    <h2>AI 推薦的事件</h2>
+    <div id="sugs">{% include "eventbuilder/_suggestions.html" %}</div>
+  </aside>
+</div>
+
+<script>
+(function() {
+  var form = document.getElementById("send-form");
+  var msgs = document.getElementById("msgs");
+  var sugs = document.getElementById("sugs");
+  if (!form) { bindSugs(); return; }
+  var token = form.querySelector("[name=csrfmiddlewaretoken]").value;
+  var area = form.querySelector("textarea");
+  var button = form.querySelector("button");
+
+  function bubble(role, text) {
+    var el = document.createElement("div");
+    el.className = "msg " + role;
+    el.textContent = text;
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+    return el;
+  }
+
+  function send() {
+    var text = area.value.trim();
+    if (!text) return;
+    area.value = "";
+    bubble("user", text);
+    var pending = bubble("assistant pending", "思考中…");
+    button.disabled = true;
+
+    var body = new FormData();
+    body.append("text", text);
+    fetch(form.dataset.url, {method: "POST", headers: {"X-CSRFToken": token}, body: body})
+      .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, d: d}; }); })
+      .then(function(res) {
+        button.disabled = false;
+        if (!res.ok) {
+          pending.textContent = "出錯了：" + (res.d.error || "未知錯誤");
+          pending.className = "msg assistant error";
+          return;
+        }
+        pending.textContent = res.d.reply;
+        pending.className = "msg assistant";
+        sugs.innerHTML = res.d.suggestions_html;
+        bindSugs();
+        // 第一輪之後 AI 會把預設的日期時間標題換成主題名稱
+        var active = document.querySelector(".eb-conv.on a");
+        if (active && res.d.title) active.textContent = res.d.title;
+      })
+      .catch(function(e) {
+        button.disabled = false;
+        pending.textContent = "連線失敗：" + e;
+        pending.className = "msg assistant error";
+      });
+  }
+
+  form.addEventListener("submit", function(ev) { ev.preventDefault(); send(); });
+  area.addEventListener("keydown", function(ev) {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(); }
+  });
+
+  function bindSugs() {
+    document.querySelectorAll(".sug-track").forEach(function(b) {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", function() {
+        b.disabled = true;
+        fetch(b.dataset.track, {method: "POST", headers: {"X-CSRFToken": csrf()}})
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            var foot = b.parentNode;
+            foot.innerHTML = '<a class="tag ok" href="/e/' + d.event_slug + '/">已追蹤 · 檢視</a>';
+          });
+      });
+    });
+    document.querySelectorAll(".sug-del").forEach(function(b) {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", function() {
+        fetch(b.dataset.del, {method: "POST", headers: {"X-CSRFToken": csrf()}})
+          .then(function() { b.closest(".sug").remove(); });
+      });
+    });
+  }
+  function csrf() {
+    var el = document.querySelector("[name=csrfmiddlewaretoken]");
+    return el ? el.value : "";
+  }
+  bindSugs();
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+})();
+</script>
+{% endblock %}

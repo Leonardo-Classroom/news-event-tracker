@@ -19,5 +19,6 @@ urlpatterns = [
     # Django admin 保留作為原始資料的檢視與修補工具；
     # 內部日常使用走 apps.web 的介面（以工作為中心，而非以資料表為中心，
     # 強制登入＋三級角色，見 apps/web/permissions.py）
+    path("build/", include("apps.eventbuilder.urls")),
     path("", include("apps.web.urls")),
 ]

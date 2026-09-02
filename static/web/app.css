@@ -300,3 +300,69 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 .kv dd { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .body-text { font-size: 13px; line-height: 1.8; white-space: pre-wrap; }
+
+/* ── 建立事件（任務 63）────────────────────────────────────
+   三欄：對話清單／對話／候選事件。高度用 vh 而非 100%，
+   因為父層沒有固定高度，百分比會塌成 0。 */
+.eb { display: grid; grid-template-columns: 220px 1fr 300px;
+      gap: 12px; height: calc(100vh - 150px); min-height: 420px; }
+.eb aside, .eb section { background: var(--surface);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      display: flex; flex-direction: column; min-height: 0; }
+.eb-list { padding: 10px; gap: 8px; }
+.eb-new { width: 100%; }
+.eb-convs { flex: 1; overflow-y: auto; min-height: 0; margin-top: 8px; }
+.eb-conv { display: flex; align-items: center; gap: 4px; padding: 5px 6px;
+      border-radius: var(--radius); }
+.eb-conv:hover { background: var(--surface-2); }
+.eb-conv.on { background: var(--surface-2); font-weight: 600; }
+.eb-conv > a { flex: 1; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; font-size: 12px; }
+.eb-menu { position: relative; }
+.eb-menu > summary { cursor: pointer; list-style: none; padding: 0 4px;
+      color: var(--text-3); }
+.eb-menu > summary::-webkit-details-marker { display: none; }
+.eb-pop { position: absolute; right: 0; z-index: 20; width: 190px;
+      background: var(--surface); border: 1px solid var(--border-strong);
+      border-radius: var(--radius); padding: 8px; display: grid; gap: 6px;
+      box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.eb-pop input { width: 100%; }
+.eb-trash { margin-top: auto; padding-top: 8px; font-size: 12px;
+      border-top: 1px solid var(--border); color: var(--text-2); }
+
+.eb-chat { padding: 10px; }
+.eb-msgs { flex: 1; overflow-y: auto; min-height: 0; display: flex;
+      flex-direction: column; gap: 8px; padding-right: 4px; }
+.msg { max-width: 78%; padding: 8px 11px; border-radius: 12px;
+      white-space: pre-wrap; line-height: 1.6; font-size: 13px; }
+.msg.user { align-self: flex-end; background: var(--danger-bg); color: var(--text); }
+.msg.assistant { align-self: flex-start; background: var(--surface-2); }
+.msg.pending { color: var(--text-3); font-style: italic; }
+.msg.error { color: var(--danger); }
+.eb-input { display: flex; gap: 8px; align-items: flex-end;
+      border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
+.eb-input textarea { flex: 1; resize: vertical; font: inherit; padding: 7px;
+      border: 1px solid var(--border-strong); border-radius: var(--radius);
+      background: var(--surface); color: var(--text); }
+
+.eb-sugs { padding: 10px; overflow-y: auto; }
+.eb-sugs h2 { font-size: 12px; color: var(--text-2); margin: 0 0 8px; }
+.sug { border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 9px; margin-bottom: 8px; }
+.sug-head { display: flex; gap: 6px; align-items: flex-start; }
+.sug-head b { flex: 1; font-size: 13px; line-height: 1.4; }
+.sug-del { border: 0; background: none; cursor: pointer; color: var(--text-3);
+      font-size: 15px; line-height: 1; padding: 0 2px; }
+.sug-del:hover { color: var(--danger); }
+.sug-sum { font-size: 12px; color: var(--text-2); margin: 6px 0;
+      line-height: 1.55; }
+.sug-foot { margin-top: 8px; }
+
+@media (max-width: 1100px) {
+  .eb { grid-template-columns: 1fr; height: auto; }
+  .eb-msgs { max-height: 50vh; }
+}
+
+/* 危險動作的按鈕。沿用既有的 --danger 變數，不另外定義顏色。 */
+.btn.danger-btn { color: var(--danger); border-color: var(--danger); }
+.btn.danger-btn:hover { background: var(--danger-bg); }

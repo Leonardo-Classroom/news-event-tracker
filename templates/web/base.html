@@ -21,6 +21,7 @@
           追蹤中<span class="count">{{ nav_counts.tracking }}</span></a>
         <a href="{% url 'web:review' %}" class="{% if nav == 'review' %}active{% endif %}">
           待審核<span class="count">{{ nav_counts.review }}</span></a>
+        <a href="{% url 'eventbuilder:builder' %}" class="{% if nav == 'eventbuilder' %}active{% endif %}">建立事件</a>
       </div>
       <div class="nav-group">
         <h6>資料</h6>

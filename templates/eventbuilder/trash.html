@@ -1,0 +1,37 @@
+{% extends "web/base.html" %}
+{% block title %}回收桶{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>回收桶</h1>
+  <span class="sub">已移除的對話——<a href="{% url 'eventbuilder:builder' %}">回建立事件</a></span>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>對話</th><th class="num">移除時間</th><th></th></tr></thead>
+    <tbody>
+    {% for c in trashed %}
+      <tr>
+        <td class="tight"><b>{{ c.title }}</b></td>
+        <td class="num tight mono">{{ c.deleted_at|date:"Y-m-d H:i" }}</td>
+        <td class="tight">
+          <div class="chips">
+            <form method="post" action="{% url 'eventbuilder:restore' c.pk %}">
+              {% csrf_token %}<button class="btn">還原</button>
+            </form>
+            <form method="post" action="{% url 'eventbuilder:delete_forever' c.pk %}"
+                  onsubmit="return confirm('永久刪除「{{ c.title|escapejs }}」？此動作無法復原。')">
+              {% csrf_token %}<button class="btn danger-btn">永久刪除</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="3" class="empty">回收桶是空的</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

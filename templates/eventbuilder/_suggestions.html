@@ -1,0 +1,23 @@
+{% for s in suggestions %}
+  <div class="sug" id="sug-{{ s.pk }}">
+    <div class="sug-head">
+      <b>{{ s.title }}</b>
+      <button type="button" class="sug-del" data-del="{% url 'eventbuilder:delete_suggestion' s.pk %}"
+              title="刪除這個候選">×</button>
+    </div>
+    {% if s.summary %}<p class="sug-sum">{{ s.summary }}</p>{% endif %}
+    {% if s.tags %}
+      <div class="chips">{% for t in s.tags %}<span class="tag muted">{{ t }}</span>{% endfor %}</div>
+    {% endif %}
+    <div class="sug-foot">
+      {% if s.is_tracked %}
+        <a class="tag ok" href="{% url 'web:event_detail' s.created_event.slug %}">已追蹤 · 檢視</a>
+      {% else %}
+        <button type="button" class="btn primary sug-track"
+                data-track="{% url 'eventbuilder:track_suggestion' s.pk %}">建立事件</button>
+      {% endif %}
+    </div>
+  </div>
+{% empty %}
+  <p class="empty">還沒有候選事件。在左邊描述你想追蹤的案件，AI 會在這裡提出建議。</p>
+{% endfor %}

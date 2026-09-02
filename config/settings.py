@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "apps.timeline",
     "apps.web",
     "apps.public",
+    "apps.eventbuilder",
 ]
 
 MIDDLEWARE = [
