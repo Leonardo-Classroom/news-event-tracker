@@ -58,7 +58,7 @@
             data-pending-url="{% url 'eventbuilder:pending' conversation.pk %}"
             data-awaiting="{% if awaiting_reply %}1{% endif %}">
         {% csrf_token %}
-        <textarea name="text" rows="2" placeholder="說說你想追蹤什麼案件…（Enter 送出，Shift+Enter 換行）"></textarea>
+        <textarea name="text" rows="1" placeholder="說說你想追蹤什麼案件…（Enter 送出，Shift+Enter 換行）"></textarea>
         <button class="btn primary">送出</button>
       </form>
     {% else %}
@@ -230,6 +230,7 @@
     if (!text) return;
     stopTyping();               // 上一則還在打字就先補完
     area.value = "";
+    autoGrow();                 // 清空後縮回一行，否則會停在剛才的高度
     bubble("user", text);
     var pending = bubble("assistant pending", "");
     textOf(pending).innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
@@ -271,6 +272,17 @@
         pending.className = "msg assistant error";
       });
   }
+
+  // 輸入框隨內容長高。先歸零再讀 scrollHeight——不歸零的話 scrollHeight
+  // 永遠不小於目前高度，刪字時就縮不回去。
+  var maxH = 160;
+  function autoGrow() {
+    area.style.height = "auto";
+    area.style.height = Math.min(area.scrollHeight, maxH) + "px";
+    area.style.overflowY = area.scrollHeight > maxH ? "auto" : "hidden";
+  }
+  area.addEventListener("input", autoGrow);
+  autoGrow();
 
   form.addEventListener("submit", function(ev) { ev.preventDefault(); send(); });
   area.addEventListener("keydown", function(ev) {

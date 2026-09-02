@@ -365,9 +365,12 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 .msg.error { color: var(--danger); }
 .eb-input { display: flex; gap: 8px; align-items: flex-end;
       border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
-.eb-input textarea { flex: 1; resize: vertical; font: inherit; padding: 7px;
+/* 高度由 JS 依內容調整，因此關掉手動 resize——兩者並存時，使用者
+   拉過之後 JS 的設定看起來就像失效。 */
+.eb-input textarea { flex: 1; resize: none; font: inherit; padding: 7px;
       border: 1px solid var(--border-strong); border-radius: var(--radius);
-      background: var(--surface); color: var(--text); }
+      background: var(--surface); color: var(--text);
+      line-height: 1.5; overflow-y: hidden; }
 
 .eb-sugs { padding: 10px; overflow-y: auto; }
 .eb-sugs h2 { font-size: 12px; color: var(--text-2); margin: 0 0 8px; }
