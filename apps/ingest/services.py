@@ -313,7 +313,7 @@ def fetch_document_body(
 
     回傳是否成功填入內文。
     """
-    from apps.ingest.article import extract_article
+    from apps.ingest.article import BODY_API_SOURCES, extract_article
 
     if document.raw_body:
         return True
@@ -321,13 +321,21 @@ def fetch_document_body(
     fetcher = fetcher or HttpFetcher()
     clock = clock or SystemClock()
 
+    # 少數站台的文章頁是 SPA，內文不在 HTML 裡，但站台自己的 API 有
+    # 結構化全文（報導者）。改打 API 比渲染瀏覽器快也穩定得多。
+    api = BODY_API_SOURCES.get(document.source.slug)
+    url = api[0](document.url) if api else document.url
+
     try:
-        response = fetcher.get(document.url)
+        response = fetcher.get(url)
         if not response.ok:
             raise FetchError(f"HTTP {response.status_code}")
-        article = extract_article(response.text, source_slug=document.source.slug)
+        if api:
+            article = api[1](response.text)
+        else:
+            article = extract_article(response.text, source_slug=document.source.slug)
     except (FetchError, ValueError) as exc:
-        logger.warning("內頁抓取失敗 %s：%s", document.url, exc)
+        logger.warning("內頁抓取失敗 %s：%s", url, exc)
         return False
 
     document.raw_body = article.body

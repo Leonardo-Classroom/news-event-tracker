@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ExtractedArticle", "extract_article", "extract_published_at",
-    "BODY_SELECTORS", "NEEDS_BROWSER",
+    "BODY_SELECTORS", "NEEDS_BROWSER", "BODY_API_SOURCES",
+    "twreporter_body_url", "extract_twreporter_article",
 ]
 
 #: 站台專屬的內文選擇器。UDN 與中時沿用 crawler/sites.py 的實證值。
@@ -55,8 +56,11 @@ BODY_SELECTORS: dict[str, str] = {
     "mirrormedia": "main",
 }
 
-#: 純 HTTP 取不到內容的站台（SPA）
-NEEDS_BROWSER: frozenset[str] = frozenset({"twreporter"})
+#: 純 HTTP 取不到內容、且沒有可用 API 的站台（SPA）。
+#: 這類來源的內文目前補不到——``fill_missing_bodies`` 會跳過它們。
+#: 報導者曾列在這裡，但 2026-09-02 實測它的 go-api 有單篇全文
+#: （見 BODY_API_SOURCES），根本不需要瀏覽器。
+NEEDS_BROWSER: frozenset[str] = frozenset()
 
 #: 內文中常見的雜訊行：圖說、記者署名、推廣文字
 _NOISE_PATTERNS = (
@@ -156,6 +160,85 @@ def extract_published_at(html: str):
     if not date_text:
         date_text = _date_from_meta(tree)
     return parse_datetime(date_text) if date_text else None
+
+
+# ------------------------------------------------------- 走站台 API 的內文
+# 報導者是 React SPA：文章頁 HTML 有 214KB 但不含內文，選擇器與 JSON-LD
+# 都抽不到。它的 go-api 直接給結構化全文，比渲染瀏覽器快也穩定得多。
+
+TWREPORTER_POST_API = "https://go-api.twreporter.org/v2/posts/{slug}?full=true"
+
+#: 內文區塊裡真正有文字的型別。youtube／embeddedcode／image 之類跳過。
+_TWREPORTER_TEXT_TYPES = frozenset({
+    "unstyled", "blockquote", "quoteby", "annotation", "infobox",
+    "header-one", "header-two", "code",
+})
+#: 內文夾帶的註解標記，如 <!--__ANNOTATION__={...}--> 與 <!--註解文字-->
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_HTML_TAG = re.compile(r"<[^>]+>")
+
+
+def twreporter_body_url(article_url: str) -> str:
+    """由文章網址組出單篇 API 網址。``/a/{slug}`` → API 的 ``{slug}``。"""
+    slug = article_url.rstrip("/").rsplit("/", 1)[-1]
+    return TWREPORTER_POST_API.format(slug=slug)
+
+
+def _twreporter_block_text(block: dict) -> list[str]:
+    content = block.get("content")
+    if isinstance(content, str):
+        return [content]
+    if not isinstance(content, list):
+        return []
+    out = []
+    for item in content:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            # infobox 之類把內文放在 body，且是 HTML 片段
+            out.append(str(item.get("body") or ""))
+    return out
+
+
+def extract_twreporter_article(raw: str) -> ExtractedArticle:
+    """解析報導者 go-api 的單篇回應。介面與 ``extract_article`` 一致。"""
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"報導者 API 回應不是 JSON：{exc}") from exc
+
+    data = payload.get("data") or {}
+    blocks = ((data.get("content") or {}).get("api_data")) or []
+    parts: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") not in _TWREPORTER_TEXT_TYPES:
+            continue
+        for text in _twreporter_block_text(block):
+            text = _HTML_COMMENT.sub("", text)
+            text = _HTML_TAG.sub("", text).strip()
+            if text:
+                parts.append(text)
+
+    body = _clean_body("\n".join(parts))
+    if len(body) < _MIN_BODY_LENGTH:
+        raise ValueError(
+            f"報導者 API 未取得足夠內文（{len(body)} 字，門檻 {_MIN_BODY_LENGTH}）"
+        )
+    return ExtractedArticle(
+        body=body,
+        published_at=parse_datetime(data.get("published_date") or ""),
+        title=" ".join((data.get("title") or "").split())[:512],
+        strategy="twreporter-api",
+    )
+
+
+#: 內文不在文章頁 HTML 裡、改打站台自己 API 的來源。
+#: slug -> (由文章網址組出 API 網址, 解析器)
+BODY_API_SOURCES = {
+    "twreporter": (twreporter_body_url, extract_twreporter_article),
+}
 
 
 def _clean_body(raw: str) -> str:
