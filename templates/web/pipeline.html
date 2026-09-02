@@ -17,20 +17,17 @@
     <div class="bar" style="margin-top:6px"><i style="width:{{ assessed_pct }}%"></i></div></div></div>
   <div class="card"><div class="stat">
     <div class="label">已向量化</div><div class="value">{{ vector_pct|floatformat:1 }}<span style="font-size:14px">%</span></div>
-    <div class="note">{{ vectorised|floatformat:0 }} / {{ relevant|floatformat:0 }} 判定為相關者</div>
+    <div class="note">{{ vectorised|floatformat:0 }} / {{ total|floatformat:0 }}　判定為相關者 {{ relevant|floatformat:0 }}</div>
     <div class="bar" style="margin-top:6px"><i style="width:{{ vector_pct }}%"></i></div></div></div>
 </div>
 
 {% if pending_assessment %}
 <p class="sub" style="margin:-4px 0 14px">
-  向量化的分母是「已判定為相關」的文件，不是全庫——目前還有
-  <b>{{ pending_assessment|floatformat:0 }}</b> 篇尚未做相關性判定，
-  那些文件不會有向量，在事件歸屬與檢索中也還看不見。
-  相關性判定目前需手動執行 <span class="mono">manage.py assess_relevance</span>。
+  百分比一律以全文數為分母。目前還有 <b>{{ pending_assessment|floatformat:0 }}</b>
+  篇尚未做相關性判定，那些文件不會被向量化，在事件歸屬與檢索中也看不見——
+  處理按鈕在 <a href="{% url 'web:rag' %}">RAG 面板</a>。
 </p>
 {% endif %}
-
-</div>
 
 <div class="card">
   <h2>來源健康度<span style="font-weight:400;color:var(--text-3)">　— fixture 測試偵測不到「網站改版」，只有連續失敗計數能發現</span></h2>

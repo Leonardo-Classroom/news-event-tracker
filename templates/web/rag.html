@@ -23,6 +23,47 @@
     <div class="note">{% for v in versions %}{{ v.n|floatformat:0 }} 篇{% if not forloop.last %}、{% endif %}{% endfor %}</div></div></div>
 </div>
 
+<div class="card">
+  <h2>處理文件<span style="font-weight:400;color:var(--text-3)">　— 一律在 CPU 執行（ADR-0011：GPU 被卡死的程序佔滿）</span></h2>
+  <div class="body">
+    <div class="grid c2">
+      <div>
+        <div class="stat">
+          <div class="label">待判定相關性</div>
+          <div class="value" id="pending-relevance">{{ pending_relevance|floatformat:0 }}</div>
+          <div class="note">規則式判定，不呼叫 LLM、不花錢</div>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn primary" id="btn-relevance"
+                  data-url="{% url 'web:rag_run' 'relevance' %}"
+                  {% if relevance_running %}disabled{% endif %}>開始判定相關性</button>
+          <span class="tag accent" id="tag-relevance"
+                {% if not relevance_running %}hidden{% endif %}>執行中</span>
+        </div>
+      </div>
+      <div>
+        <div class="stat">
+          <div class="label">待向量化</div>
+          <div class="value" id="pending-embed">{{ pending_embed|floatformat:0 }}</div>
+          <div class="note">BGE-M3 於 CPU，實測約 2.4 篇／秒</div>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn primary" id="btn-embed"
+                  data-url="{% url 'web:rag_run' 'embed' %}"
+                  {% if embed_running %}disabled{% endif %}>開始向量化</button>
+          <span class="tag accent" id="tag-embed"
+                {% if not embed_running %}hidden{% endif %}>執行中</span>
+        </div>
+      </div>
+    </div>
+    <p class="sub" style="margin:12px 0 0">
+      兩者都是接力式的：做完一批自動接下一批，直到沒有待處理的為止；
+      中途被 worker 重啟打斷時，已完成的批次不會白做。
+      相關性要先跑完，向量化才有東西可做——只有判定為相關的文件會被向量化。
+    </p>
+  </div>
+</div>
+
 <p class="sub" style="margin:-4px 0 14px">
   <b>兩個通道的覆蓋範圍不同</b>：關鍵字（bigram）對全庫都有效；向量只涵蓋已判定為相關並完成向量化的
   {{ vectorised|floatformat:0 }} 篇。所以一篇沒向量化的文件仍可能被關鍵字撈到，反之則否——
@@ -101,4 +142,92 @@
   </div>
 </div>
 {% endif %}
+<script>
+(function() {
+  var csrf = "{{ csrf_token }}";
+  function bind(btnId, tagId) {
+    var b = document.getElementById(btnId);
+    b.addEventListener("click", function() {
+      b.disabled = true;
+      document.getElementById(tagId).hidden = false;
+      fetch(b.dataset.url, {method: "POST", headers: {"X-CSRFToken": csrf}})
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.error) { b.disabled = false; alert(d.error); } });
+    });
+  }
+  bind("btn-relevance", "tag-relevance");
+  bind("btn-embed", "tag-embed");
+
+  // 只在有東西在跑時輪詢——沒事也每 5 秒打一次資料庫是浪費。
+  var timer = null;
+  function poll() {
+    fetch("{% url 'web:rag_status' %}")
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        document.getElementById("pending-relevance").textContent =
+          d.pending_relevance.toLocaleString();
+        document.getElementById("pending-embed").textContent =
+          d.pending_embed.toLocaleString();
+        toggle("relevance", d.relevance_running);
+        toggle("embed", d.embed_running);
+        if (!d.relevance_running && !d.embed_running && timer) {
+          clearInterval(timer); timer = null;
+        }
+      })
+      .catch(function() {});
+  }
+  function toggle(name, running) {
+    document.getElementById("tag-" + name).hidden = !running;
+    document.getElementById("btn-" + name).disabled = running;
+  }
+  function start() { if (!timer) timer = setInterval(poll, 5000); }
+  document.getElementById("btn-relevance").addEventListener("click", start);
+  document.getElementById("btn-embed").addEventListener("click", start);
+  {% if relevance_running or embed_running %}start();{% endif %}
+})();
+</script>
+<script>
+(function() {
+  var csrf = "{{ csrf_token }}";
+  function bind(btnId, tagId) {
+    var b = document.getElementById(btnId);
+    b.addEventListener("click", function() {
+      b.disabled = true;
+      document.getElementById(tagId).hidden = false;
+      fetch(b.dataset.url, {method: "POST", headers: {"X-CSRFToken": csrf}})
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.error) { b.disabled = false; alert(d.error); } });
+    });
+  }
+  bind("btn-relevance", "tag-relevance");
+  bind("btn-embed", "tag-embed");
+
+  // 只在有東西在跑時輪詢——沒事也每 5 秒打一次資料庫是浪費。
+  var timer = null;
+  function poll() {
+    fetch("{% url 'web:rag_status' %}")
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        document.getElementById("pending-relevance").textContent =
+          d.pending_relevance.toLocaleString();
+        document.getElementById("pending-embed").textContent =
+          d.pending_embed.toLocaleString();
+        toggle("relevance", d.relevance_running);
+        toggle("embed", d.embed_running);
+        if (!d.relevance_running && !d.embed_running && timer) {
+          clearInterval(timer); timer = null;
+        }
+      })
+      .catch(function() {});
+  }
+  function toggle(name, running) {
+    document.getElementById("tag-" + name).hidden = !running;
+    document.getElementById("btn-" + name).disabled = running;
+  }
+  function start() { if (!timer) timer = setInterval(poll, 5000); }
+  document.getElementById("btn-relevance").addEventListener("click", start);
+  document.getElementById("btn-embed").addEventListener("click", start);
+  {% if relevance_running or embed_running %}start();{% endif %}
+})();
+</script>
 {% endblock %}

@@ -395,12 +395,13 @@ def pipeline(request):
         "with_body": with_body, "vectorised": vectorised,
         "fetched_today": today,
         "pending_assessment": total - assessed,
+        # **每一格的分母都是全文數。** 先前向量化用「判定為相關者」
+        # 當分母，顯示 100%——技術上沒錯，但總覽頁的百分比若各自
+        # 用不同分母，就無法互相比較，也看不出整條管線走到哪。
         "body_pct": with_body / total * 100 if total else 0,
         "assessed_pct": assessed / total * 100 if total else 0,
-        # 相關性只在已判定的範圍內才有意義——用全庫當分母會讓這個
-        # 比例隨著未判定的積壓變多而不斷下降，看起來像品質變差。
-        "relevant_pct": relevant / assessed * 100 if assessed else 0,
-        "vector_pct": vectorised / relevant * 100 if relevant else 0,
+        "relevant_pct": relevant / total * 100 if total else 0,
+        "vector_pct": vectorised / total * 100 if total else 0,
     })
 
 
@@ -422,6 +423,12 @@ def rag_panel(request):
     versions = (Document.objects.exclude(embedding_version="")
                 .values("embedding_version")
                 .annotate(n=Count("id")).order_by("-n")[:5])
+
+    from apps.retrieval.tasks import EMBED_LOCK, RELEVANCE_LOCK, is_running
+
+    pending_relevance = Document.objects.pending_relevance().count()
+    pending_embed = (Document.objects.relevant()
+                     .filter(embedding__isnull=True).exclude(raw_body="").count())
 
     query = request.GET.get("q", "").strip()
     rows: list[dict] = []
@@ -455,8 +462,55 @@ def rag_panel(request):
         "nav": "rag", "query": query, "rows": rows, "error": error,
         "channel_hits": channel_hits,
         "total": total, "vectorised": vectorised, "relevant": relevant,
-        "vector_pct": vectorised / relevant * 100 if relevant else 0,
+        "vector_pct": vectorised / total * 100 if total else 0,
         "versions": versions,
+        "pending_relevance": pending_relevance,
+        "pending_embed": pending_embed,
+        "relevance_running": is_running(RELEVANCE_LOCK),
+        "embed_running": is_running(EMBED_LOCK),
+    })
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def rag_run(request, job: str):
+    """啟動 RAG 前處理。兩者都在 CPU 上跑（ADR-0011）。
+
+    以 fetch 呼叫、回 JSON——按下之後畫面要立刻變成「執行中」，
+    整頁跳轉會讓人以為沒反應。
+    """
+    from apps.retrieval.tasks import (
+        EMBED_LOCK, RELEVANCE_LOCK, assess_relevance_batch, embed_batch,
+        is_running,
+    )
+
+    jobs = {
+        "relevance": (RELEVANCE_LOCK, assess_relevance_batch),
+        "embed": (EMBED_LOCK, embed_batch),
+    }
+    if job not in jobs:
+        return JsonResponse({"error": "未知的作業"}, status=400)
+    lock, task = jobs[job]
+    if is_running(lock):
+        return JsonResponse({"running": True, "already": True})
+    task.delay()
+    return JsonResponse({"running": True})
+
+
+@require_role(Role.USER)
+def rag_status(request):
+    """給前端輪詢：目前在跑什麼、還剩多少。"""
+    from apps.retrieval.tasks import EMBED_LOCK, RELEVANCE_LOCK, is_running
+
+    return JsonResponse({
+        "relevance_running": is_running(RELEVANCE_LOCK),
+        "embed_running": is_running(EMBED_LOCK),
+        "pending_relevance": Document.objects.pending_relevance().count(),
+        "pending_embed": (Document.objects.relevant()
+                          .filter(embedding__isnull=True)
+                          .exclude(raw_body="").count()),
+        "vectorised": Document.objects.exclude(embedding=None).count(),
+        "relevant": Document.objects.relevant().count(),
     })
 
 
