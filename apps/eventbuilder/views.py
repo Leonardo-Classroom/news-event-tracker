@@ -117,13 +117,27 @@ def trash_conversation(request, pk: int):
     return redirect("eventbuilder:builder")
 
 
+def _is_fetch(request) -> bool:
+    """由前端 fetch 呼叫（而非表單送出）。
+
+    用自訂標頭而不是 Accept——瀏覽器的 fetch 預設 Accept 是 */*，
+    無法用來區分。
+    """
+    return request.headers.get("X-Modal") == "1"
+
+
 @require_role(Role.USER)
 def trash(request):
-    return render(request, "eventbuilder/trash.html", {
+    """回收桶。fetch 時只回片段供 modal 使用；直接開網址時回完整頁面
+    ——modal 需要 JS，保留可直接連結的版本作為退路。"""
+    context = {
         "nav": "eventbuilder",
         "conversations": _owned(request).alive(),
         "trashed": _owned(request).trashed(),
-    })
+    }
+    if _is_fetch(request):
+        return render(request, "eventbuilder/_trash.html", context)
+    return render(request, "eventbuilder/trash.html", context)
 
 
 @require_role(Role.USER)
@@ -131,6 +145,8 @@ def trash(request):
 def restore_conversation(request, pk: int):
     conversation = get_object_or_404(_owned(request).trashed(), pk=pk)
     conversation.restore()
+    if _is_fetch(request):
+        return JsonResponse({"slug": conversation.pk})
     return redirect("eventbuilder:conversation", pk=conversation.pk)
 
 
@@ -139,6 +155,8 @@ def restore_conversation(request, pk: int):
 def delete_forever(request, pk: int):
     """真的刪除。只允許已經在回收桶裡的——避免一次誤點就永久失去。"""
     get_object_or_404(_owned(request).trashed(), pk=pk).delete()
+    if _is_fetch(request):
+        return JsonResponse({"ok": True})
     return redirect("eventbuilder:trash")
 
 

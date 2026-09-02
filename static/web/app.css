@@ -402,3 +402,19 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 .cite { display: block; font-size: 12px; line-height: 1.45; }
 .cite-meta { display: block; font-size: 11px; color: var(--text-3);
       font-family: var(--mono); }
+
+/* 原生 <dialog>。瀏覽器預設樣式在各家差異大，這裡整組覆蓋。 */
+.modal { border: 1px solid var(--border-strong); border-radius: var(--radius);
+      padding: 0; width: min(560px, 92vw); background: var(--surface);
+      color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
+.modal::backdrop { background: rgba(0,0,0,.42); }
+.modal-head { display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 14px; border-bottom: 1px solid var(--border); }
+.modal-x { border: 0; background: none; font-size: 20px; line-height: 1;
+      cursor: pointer; color: var(--text-3); padding: 0 4px; }
+.modal-x:hover { color: var(--text); }
+.modal-body { padding: 12px 14px; max-height: 60vh; overflow-y: auto; }
+.trash-tb { width: 100%; border-collapse: collapse; }
+.trash-tb td { padding: 8px 4px; border-bottom: 1px solid var(--border);
+      vertical-align: middle; }
+.trash-tb tr:last-child td { border-bottom: 0; }

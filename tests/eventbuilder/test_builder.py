@@ -353,3 +353,51 @@ class TestMalformedResponse:
         result = send_message(conversation, "問題",
                               provider=Truncated(['{"reply":"半句']))
         assert "截斷" in result.error
+
+
+@pytest.mark.medium
+class TestTrashModal:
+    """回收桶以 modal 彈出；直接開網址仍要有完整頁面（modal 需要 JS，
+    保留可直接連結的版本作為退路）。"""
+
+    def test_fetch時只回片段(self, client, user, conversation):
+        client.force_login(user)
+        conversation.trash()
+        r = client.get("/build/trash/", headers={"X-Modal": "1"})
+        html = r.content.decode()
+        assert conversation.title in html
+        assert "<html" not in html          # 片段，不是整頁
+        assert "trash-tb" in html
+
+    def test_直接開網址仍是完整頁面(self, client, user, conversation):
+        client.force_login(user)
+        conversation.trash()
+        html = client.get("/build/trash/").content.decode()
+        assert "<html" in html
+        assert conversation.title in html
+
+    def test_modal內還原回json不轉址(self, client, user, conversation):
+        client.force_login(user)
+        conversation.trash()
+        r = client.post(f"/build/c/{conversation.pk}/restore/",
+                        headers={"X-Modal": "1"})
+        assert r.status_code == 200
+        assert r["Content-Type"].startswith("application/json")
+        conversation.refresh_from_db()
+        assert conversation.deleted_at is None
+
+    def test_modal內永久刪除回json不轉址(self, client, user, conversation):
+        client.force_login(user)
+        conversation.trash()
+        r = client.post(f"/build/c/{conversation.pk}/delete/",
+                        headers={"X-Modal": "1"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert not Conversation.objects.filter(pk=conversation.pk).exists()
+
+    def test_表單送出仍走轉址(self, client, user, conversation):
+        """沒有 JS 時是一般表單，必須維持原本的轉址行為。"""
+        client.force_login(user)
+        conversation.trash()
+        r = client.post(f"/build/c/{conversation.pk}/restore/")
+        assert r.status_code == 302

@@ -1,0 +1,19 @@
+{% if trashed %}
+  <table class="trash-tb">
+    <tbody>
+    {% for c in trashed %}
+      <tr>
+        <td class="tight"><b>{{ c.title }}</b><br>
+          <span class="mono" style="font-size:11px;color:var(--text-3)">{{ c.deleted_at|date:"Y-m-d H:i" }} 移除</span></td>
+        <td class="tight" style="text-align:right;white-space:nowrap">
+          <button type="button" class="btn" data-restore="{% url 'eventbuilder:restore' c.pk %}">還原</button>
+          <button type="button" class="btn danger-btn" data-purge="{% url 'eventbuilder:delete_forever' c.pk %}"
+                  data-title="{{ c.title }}">永久刪除</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="empty">回收桶是空的</p>
+{% endif %}

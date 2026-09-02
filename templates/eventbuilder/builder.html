@@ -38,7 +38,9 @@
       {% endfor %}
     </div>
 
-    <a class="eb-trash" href="{% url 'eventbuilder:trash' %}">🗑 回收桶</a>
+    {# 退路：JS 失效時仍可直接開回收桶頁面 #}
+    <a class="eb-trash" href="{% url 'eventbuilder:trash' %}" id="trash-open"
+       data-url="{% url 'eventbuilder:trash' %}">🗑 回收桶</a>
   </aside>
 
   {# ── 中：對話 ── #}
@@ -69,7 +71,74 @@
   </aside>
 </div>
 
+{# 原生 <dialog>：ESC 關閉、焦點管理、backdrop 都內建，不必自己實作 #}
+<dialog id="trash-modal" class="modal">
+  <div class="modal-head">
+    <b>回收桶</b>
+    <button type="button" class="modal-x" data-close aria-label="關閉">×</button>
+  </div>
+  <div class="modal-body" id="trash-body"></div>
+</dialog>
+
 <script>
+(function() {
+  // ── 回收桶 modal ──────────────────────────────────────────
+  var openLink = document.getElementById("trash-open");
+  var modal = document.getElementById("trash-modal");
+  var tbody = document.getElementById("trash-body");
+
+  function token() {
+    var el = document.querySelector("[name=csrfmiddlewaretoken]");
+    return el ? el.value : "";
+  }
+
+  function loadTrash() {
+    tbody.innerHTML = '<p class="empty">載入中…</p>';
+    fetch(openLink.dataset.url, {headers: {"X-Modal": "1"}})
+      .then(function(r) { return r.text(); })
+      .then(function(html) { tbody.innerHTML = html; bindTrash(); })
+      .catch(function() {
+        tbody.innerHTML = '<p class="empty">載入失敗，請直接開啟回收桶頁面</p>';
+      });
+  }
+
+  function bindTrash() {
+    tbody.querySelectorAll("[data-restore]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        b.disabled = true;
+        fetch(b.dataset.restore, {method: "POST",
+              headers: {"X-CSRFToken": token(), "X-Modal": "1"}})
+          // 還原後對話要回到左側清單，整頁重載最單純也最不會漏。
+          .then(function() { location.reload(); });
+      });
+    });
+    tbody.querySelectorAll("[data-purge]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        if (!confirm("永久刪除「" + b.dataset.title + "」？此動作無法復原。")) return;
+        b.disabled = true;
+        fetch(b.dataset.purge, {method: "POST",
+              headers: {"X-CSRFToken": token(), "X-Modal": "1"}})
+          .then(loadTrash);      // 只有回收桶內容變了，重載清單即可
+      });
+    });
+  }
+
+  if (openLink && modal && typeof modal.showModal === "function") {
+    openLink.addEventListener("click", function(ev) {
+      ev.preventDefault();
+      loadTrash();
+      modal.showModal();
+    });
+    modal.addEventListener("click", function(ev) {
+      // 點 backdrop（也就是點在 dialog 本身而非內容上）就關閉
+      if (ev.target === modal) modal.close();
+    });
+    modal.querySelector("[data-close]").addEventListener("click", function() {
+      modal.close();
+    });
+  }
+})();
+
 (function() {
   var form = document.getElementById("send-form");
   var msgs = document.getElementById("msgs");
