@@ -143,11 +143,22 @@
     var body = new FormData();
     body.append("text", text);
     fetch(form.dataset.url, {method: "POST", headers: {"X-CSRFToken": token}, body: body})
-      .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, d: d}; }); })
+      .then(function(r) {
+        // 伺服器出錯或 session 過期時回的是 HTML 錯誤頁，直接 r.json()
+        // 只會拋「Unexpected token '<'」，把問題指向錯誤的方向。
+        return r.text().then(function(raw) {
+          try { return {ok: r.ok, status: r.status, d: JSON.parse(raw)}; }
+          catch (e) { return {ok: false, status: r.status, d: null}; }
+        });
+      })
       .then(function(res) {
         button.disabled = false;
         if (!res.ok) {
-          pending.textContent = "出錯了：" + (res.d.error || "未知錯誤");
+          var msg = res.d && res.d.error ? res.d.error
+                  : res.status === 403 ? "登入已過期，請重新整理頁面"
+                  : res.status === 404 ? "這個對話已不存在，請重新整理或建立新對話"
+                  : "伺服器發生錯誤（HTTP " + res.status + "）";
+          pending.textContent = msg;
           pending.className = "msg assistant error";
           return;
         }

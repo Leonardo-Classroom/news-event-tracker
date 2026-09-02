@@ -55,8 +55,18 @@ def post_message(request, pk: int):
 
     以 fetch 呼叫、回傳 HTML 片段而非整頁重載——對話介面若每次都整頁
     跳轉，捲動位置與輸入焦點都會丟失。
+
+    **所有失敗路徑都必須回 JSON。** 這個端點只被 fetch 呼叫，若讓
+    Django 回預設的 404／500 HTML 錯誤頁，前端解析時只會得到
+    「Unexpected token '<'」——那訊息完全指不出真正的原因。
     """
-    conversation = get_object_or_404(_owned(request).alive(), pk=pk)
+    conversation = _owned(request).alive().filter(pk=pk).first()
+    if conversation is None:
+        # 分頁開著、對話卻已被刪除或移到回收桶（另一個分頁、或別的
+        # 裝置操作的）。這不是錯誤，是狀態過期。
+        return JsonResponse(
+            {"error": "這個對話已不存在，請重新整理或建立新對話",
+             "stale": True}, status=404)
     result = send_message(conversation, request.POST.get("text", ""))
     conversation.refresh_from_db()
     if result.error:

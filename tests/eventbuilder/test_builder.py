@@ -199,3 +199,32 @@ class TestViews:
         s.refresh_from_db()
         assert s.deleted_at is not None
         assert s not in EventSuggestion.objects.alive()
+
+
+@pytest.mark.medium
+class TestStaleConversation:
+    """分頁開著、對話卻已被刪除。這個端點只被 fetch 呼叫，任何失敗
+    都必須回 JSON——回 Django 預設的 HTML 錯誤頁的話，前端解析只會
+    得到「Unexpected token '<'」，訊息完全指不出真正原因。"""
+
+    def test_對話不存在回json而非html(self, client, user):
+        client.force_login(user)
+        r = client.post("/build/c/999999/send/", {"text": "問題"})
+        assert r.status_code == 404
+        assert r["Content-Type"].startswith("application/json")
+        assert r.json()["stale"] is True
+
+    def test_對話已在回收桶回json(self, client, user, conversation):
+        client.force_login(user)
+        conversation.trash()
+        r = client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
+        assert r.status_code == 404
+        assert r.json()["stale"] is True
+
+    def test_別人的對話仍是404且不洩漏存在與否(self, client, conversation,
+                                              django_user_model):
+        other = django_user_model.objects.create_user("stranger", password="x")
+        client.force_login(other)
+        r = client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
+        assert r.status_code == 404
+        assert r.json()["stale"] is True
