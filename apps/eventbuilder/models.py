@@ -68,6 +68,11 @@ class Message(models.Model):
                                      related_name="messages")
     role = models.CharField(max_length=16, choices=Role.choices)
     content = models.TextField()
+    #: AI 在這則回覆中引用的館藏文件。**外鍵而非自由文字**——模型
+    #: 只能從我們檢索出來的候選裡挑，挑不到就沒有連結；讓它自己寫
+    #: 標題與網址等於允許它捏造不存在的新聞。
+    documents = models.ManyToManyField("ingest.Document", blank=True,
+                                       related_name="+")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

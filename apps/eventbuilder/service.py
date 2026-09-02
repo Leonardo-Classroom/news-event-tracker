@@ -19,8 +19,10 @@ import logging
 from django.utils import timezone
 
 from apps.eventbuilder.models import Conversation, EventSuggestion, Message, Role
+from apps.ingest.models import Document
 from apps.llm.models import LlmPurpose
 from apps.llm.provider import LlmError, get_provider
+from apps.retrieval.keyword import BigramFtsBackend
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,13 @@ _SYSTEM_PROMPT = """你是台灣重大司法案件與政商弊案的追蹤助理
                   "tags": ["涉案人或機關", "案件類型", "地區"]}]}
 
 沒有足夠資訊形成具體事件時，suggestions 給空陣列，用 reply 追問。
-不要重複提出使用者已經看過的候選事件。"""
+不要重複提出使用者已經看過的候選事件。
+
+若系統提供了「館藏文件」清單，從中挑出真正與討論相關的，把它們的
+編號放進 documents 欄位（最多 5 筆）：
+{"reply": "...", "suggestions": [...], "documents": [12, 34]}
+**只能引用清單裡的編號。** 清單沒有的就不要放，也不要自己寫標題或
+網址——你不知道那些新聞是否真的存在。清單裡沒有相關的就給空陣列。"""
 
 _TITLE_PROMPT = """用不超過 16 個繁體中文字，為這段對話下一個標題。
 只回覆標題本身，不要引號、不要標點、不要說明。"""
@@ -65,6 +73,7 @@ _SCHEMA = {
                 "required": ["title"],
             },
         },
+        "documents": {"type": "array", "items": {"type": "integer"}},
     },
     "required": ["reply"],
 }
@@ -74,6 +83,7 @@ _SCHEMA = {
 class TurnResult:
     reply: str
     suggestions: list[EventSuggestion]
+    documents: list = dataclasses.field(default_factory=list)
     error: str = ""
 
 
@@ -89,6 +99,42 @@ def _history(conversation: Conversation) -> list[dict[str, str]]:
 
 def _existing_titles(conversation: Conversation) -> list[str]:
     return list(conversation.suggestions.alive().values_list("title", flat=True))
+
+
+#: 一次提供給模型的館藏候選數。太少會讓它挑不到相關的，太多會讓
+#: prompt 變長、成本上升——這裡只需要「有沒有相關報導」的線索。
+_DOC_CANDIDATES = 12
+
+
+def retrieve_candidates(text: str, *, limit: int = _DOC_CANDIDATES) -> list[Document]:
+    """從館藏找出與這句話相關的文件。
+
+    用 ``mode="any"`` 加 ``rank`` 而非 ``all``：使用者是用自然語言
+    描述案件，逐詞 AND 幾乎必定 0 筆。寬鬆比對會命中很多，因此
+    ``rank`` 不是可選的——沒有相關性排序就只能靠截斷，而截斷什麼
+    都不看（任務 19 的實測結論）。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    backend = BigramFtsBackend()
+    base = Document.objects.exclude(raw_body="").select_related("source")
+    try:
+        hits = backend.search(base, text, mode="any")
+        hits = backend.rank(hits, text)
+        return list(hits[:limit])
+    except Exception as exc:                       # noqa: BLE001
+        # 檢索失敗不該讓整輪對話失敗——沒有推薦新聞仍然可以討論。
+        logger.warning("建立事件的館藏檢索失敗：%s", exc)
+        return []
+
+
+def _candidate_block(documents: list[Document]) -> str:
+    lines = []
+    for doc in documents:
+        when = doc.published_at.strftime("%Y-%m-%d") if doc.published_at else "日期不明"
+        lines.append(f"{doc.pk}｜{when}｜{doc.source.name}｜{doc.title}")
+    return "館藏文件（只能引用這些編號）：\n" + "\n".join(lines)
 
 
 def send_message(conversation: Conversation, text: str, *, provider=None) -> TurnResult:
@@ -107,6 +153,10 @@ def send_message(conversation: Conversation, text: str, *, provider=None) -> Tur
             "role": "system",
             "content": "使用者已看過這些候選事件，不要重複提出：" + "、".join(seen),
         })
+    candidates = retrieve_candidates(text)
+    if candidates:
+        messages.append({"role": "system",
+                         "content": _candidate_block(candidates)})
     messages += _history(conversation)
 
     try:
@@ -123,8 +173,16 @@ def send_message(conversation: Conversation, text: str, *, provider=None) -> Tur
         return TurnResult(reply="", suggestions=[], error=str(exc))
 
     reply = (payload.get("reply") or "").strip()
-    Message.objects.create(conversation=conversation, role=Role.ASSISTANT,
-                           content=reply)
+    assistant = Message.objects.create(conversation=conversation,
+                                       role=Role.ASSISTANT, content=reply)
+
+    # **只認得候選清單裡的編號。** 模型可能回傳不存在的 id（幻覺）或
+    # 我們沒提供的 id；以本輪候選的集合為準做交集，其餘一律丟棄。
+    allowed = {d.pk: d for d in candidates}
+    cited = [allowed[i] for i in _as_ints(payload.get("documents"))
+             if i in allowed][:5]
+    if cited:
+        assistant.documents.set(cited)
 
     created: list[EventSuggestion] = []
     for item in payload.get("suggestions") or []:
@@ -143,7 +201,17 @@ def send_message(conversation: Conversation, text: str, *, provider=None) -> Tur
     conversation.save(update_fields=["updated_at"])
     if not conversation.title_generated:
         _rename_by_topic(conversation, provider=provider)
-    return TurnResult(reply=reply, suggestions=created)
+    return TurnResult(reply=reply, suggestions=created, documents=cited)
+
+
+def _as_ints(values) -> list[int]:
+    out = []
+    for v in values or []:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def create_event_from(suggestion: EventSuggestion):

@@ -228,3 +228,84 @@ class TestStaleConversation:
         r = client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
         assert r.status_code == 404
         assert r.json()["stale"] is True
+
+
+@pytest.mark.medium
+class TestCitedDocuments:
+    """AI 推薦的新聞必須是館藏裡真實存在的文件。
+
+    讓模型自己寫標題與網址等於允許它捏造不存在的新聞——因此它只能
+    從我們檢索出來的候選裡挑編號，其餘一律丟棄。
+    """
+
+    @pytest.fixture
+    def docs(self, db):
+        from apps.ingest.models import ContentClass, Document, Source, SourceType
+        source = Source.objects.create(
+            slug="s", name="測試報", type=SourceType.NEWS_SCRAPE,
+            base_url="https://example.test")
+        return [Document.objects.create(
+            source=source, url=f"https://example.test/{i}",
+            title=f"新竹棒球場相關報導{i}", raw_body="內文" * 60,
+            content_class=ContentClass.COPYRIGHTED) for i in range(3)]
+
+    def test_引用被掛在回覆訊息上(self, conversation, docs):
+        turn = dict(TURN, documents=[docs[0].pk, docs[1].pk])
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=docs):
+            result = send_message(conversation, "新竹棒球場",
+                                  provider=FakeProvider([turn, "標題"]))
+        assert {d.pk for d in result.documents} == {docs[0].pk, docs[1].pk}
+        assistant = conversation.messages.filter(role=Role.ASSISTANT).first()
+        assert assistant.documents.count() == 2
+
+    def test_不存在的編號被丟棄(self, conversation, docs):
+        """模型可能回傳幻覺 id——以本輪候選集合做交集。"""
+        turn = dict(TURN, documents=[docs[0].pk, 999999])
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=docs):
+            result = send_message(conversation, "問題",
+                                  provider=FakeProvider([turn, "標題"]))
+        assert [d.pk for d in result.documents] == [docs[0].pk]
+
+    def test_沒提供給它的文件也不能引用(self, conversation, docs):
+        """即使 id 真實存在，只要不在本輪候選裡就不算——否則模型可以
+        靠猜編號引用任意文件。"""
+        turn = dict(TURN, documents=[docs[2].pk])
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=docs[:2]):
+            result = send_message(conversation, "問題",
+                                  provider=FakeProvider([turn, "標題"]))
+        assert result.documents == []
+
+    def test_檢索失敗不影響對話(self, conversation):
+        with patch("apps.eventbuilder.service.BigramFtsBackend.search",
+                   side_effect=RuntimeError("索引壞了")):
+            result = send_message(conversation, "問題",
+                                  provider=FakeProvider([TURN, "標題"]))
+        assert result.error == ""
+        assert result.documents == []
+
+    def test_引用渲染為連到我方文件頁的新分頁(self, client, user, conversation, docs):
+        client.force_login(user)
+        turn = dict(TURN, documents=[docs[0].pk])
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=docs), \
+             patch("apps.eventbuilder.service.get_provider",
+                   return_value=FakeProvider([turn, "標題"])):
+            r = client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
+        html = r.json()["cited_html"]
+        assert f'href="/documents/{docs[0].pk}/"' in html
+        assert 'target="_blank"' in html
+        assert docs[0].title in html
+
+    def test_重新載入頁面仍看得到引用(self, client, user, conversation, docs):
+        client.force_login(user)
+        turn = dict(TURN, documents=[docs[0].pk])
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=docs), \
+             patch("apps.eventbuilder.service.get_provider",
+                   return_value=FakeProvider([turn, "標題"])):
+            client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
+        html = client.get(f"/build/c/{conversation.pk}/").content.decode()
+        assert f'href="/documents/{docs[0].pk}/"' in html

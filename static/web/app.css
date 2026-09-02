@@ -390,3 +390,12 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 /* 危險動作的按鈕。沿用既有的 --danger 變數，不另外定義顏色。 */
 .btn.danger-btn { color: var(--danger); border-color: var(--danger); }
 .btn.danger-btn:hover { background: var(--danger-bg); }
+
+/* 對話中的相關報導：連到我方的文件頁，不是外部原文——外部連結會
+   把人帶離系統，而文件頁才有我們的歸屬、識別碼與事件關聯。 */
+.cites { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--border);
+      display: flex; flex-direction: column; gap: 5px; }
+.cites-lab { font-size: 11px; color: var(--text-3); }
+.cite { display: block; font-size: 12px; line-height: 1.45; }
+.cite-meta { display: block; font-size: 11px; color: var(--text-3);
+      font-family: var(--mono); }

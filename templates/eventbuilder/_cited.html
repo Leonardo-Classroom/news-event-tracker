@@ -1,0 +1,9 @@
+{% if documents %}
+  <div class="cites">
+    <span class="cites-lab">相關報導</span>
+    {% for d in documents %}
+      <a class="cite" href="{% url 'web:document_detail' d.pk %}" target="_blank"
+         rel="noopener">{{ d.title }}<span class="cite-meta">{{ d.source.name }}{% if d.published_at %} · {{ d.published_at|date:"Y-m-d" }}{% endif %}</span></a>
+    {% endfor %}
+  </div>
+{% endif %}

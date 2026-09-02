@@ -46,7 +46,9 @@
     {% if conversation %}
       <div class="eb-msgs" id="msgs">
         {% for m in messages_list %}
-          <div class="msg {{ m.role }}">{{ m.content|linebreaksbr }}</div>
+          <div class="msg {{ m.role }}">{{ m.content|linebreaksbr }}
+            {% include "eventbuilder/_cited.html" with documents=m.cited %}
+          </div>
         {% empty %}
           <p class="empty">描述你想追蹤的案件——例如「我想追蹤新竹棒球場的弊案進度」。</p>
         {% endfor %}
@@ -93,16 +95,28 @@
   // 整份回來再逐字寫出。
   var typing = null;
 
-  function typeInto(el, text) {
+  // cited 是「相關報導」的 HTML，打完字才接上——打字用 textContent
+  // 會把先插入的節點洗掉。
+  function appendCited(el, cited) {
+    if (!cited) return;
+    var box = document.createElement("div");
+    box.innerHTML = cited;
+    while (box.firstChild) el.appendChild(box.firstChild);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function typeInto(el, text, cited) {
     stopTyping();
     el.textContent = "";
     // 尊重使用者的「減少動態效果」偏好——有些人會因動態不適。
     if (window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       el.textContent = text;
+      appendCited(el, cited);
       msgs.scrollTop = msgs.scrollHeight;
       return;
     }
+    el.dataset.cited = cited || "";
     // 每次寫幾個字：長回應若逐字寫會拖到數十秒，因此把總步數壓在
     // 約 150 步以內（約 3 秒），短回應仍是一次一字。
     var step = Math.max(1, Math.ceil(text.length / 150));
@@ -127,6 +141,9 @@
     if (half) {
       half.textContent = half.dataset.full;
       delete half.dataset.full;
+      var cited = half.dataset.cited;
+      delete half.dataset.cited;
+      appendCited(half, cited);
     }
   }
 
@@ -163,7 +180,7 @@
           return;
         }
         pending.className = "msg assistant";
-        typeInto(pending, res.d.reply);
+        typeInto(pending, res.d.reply, res.d.cited_html);
         sugs.innerHTML = res.d.suggestions_html;
         bindSugs();
         // 第一輪之後 AI 會把預設的日期時間標題換成主題名稱

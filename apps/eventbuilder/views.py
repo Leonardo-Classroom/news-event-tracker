@@ -20,12 +20,23 @@ def _owned(request):
     return Conversation.objects.filter(owner=request.user)
 
 
+def _with_citations(conversation):
+    """訊息連同引用的館藏文件。prefetch 而非逐則查——一段長對話
+    會有數十則訊息，逐則取 M2M 就是數十次查詢。"""
+    if conversation is None:
+        return []
+    messages = list(conversation.messages.prefetch_related("documents__source"))
+    for m in messages:
+        m.cited = list(m.documents.all())
+    return messages
+
+
 def _context(request, conversation=None):
     return {
         "nav": "eventbuilder",
         "conversations": _owned(request).alive(),
         "conversation": conversation,
-        "messages_list": list(conversation.messages.all()) if conversation else [],
+        "messages_list": _with_citations(conversation),
         "suggestions": (list(conversation.suggestions.alive()
                              .select_related("created_event"))
                         if conversation else []),
@@ -74,6 +85,9 @@ def post_message(request, pk: int):
     return JsonResponse({
         "reply": result.reply,
         "title": conversation.title,
+        "cited_html": render_to_string(
+            "eventbuilder/_cited.html",
+            {"documents": result.documents}, request=request),
         "suggestions_html": render_to_string(
             "eventbuilder/_suggestions.html",
             {"suggestions": list(conversation.suggestions.alive()
