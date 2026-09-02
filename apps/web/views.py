@@ -43,7 +43,7 @@ from apps.ingest.services import (
     FAILURE_THRESHOLD, effective_interval_minutes, mark_poll_started,
     poll_in_progress, should_poll,
 )
-from apps.ingest.tasks import NEWS_POLL_TYPES, dispatch_historical, dispatch_poll
+from apps.ingest.tasks import LIST_POLL_TYPES, dispatch_historical, dispatch_poll
 from apps.llm.budget import approved_usd, remaining_usd, spent_usd
 from apps.llm.models import LlmPurpose, LlmUsage
 from apps.web.permissions import Role, require_role
@@ -443,7 +443,7 @@ def _crawler_rows(now):
                 and not source.historical_cursor
             ),
             "can_backfill": bool(
-                spec and spec.url_template and source.type in NEWS_POLL_TYPES
+                spec and spec.url_template and source.type in LIST_POLL_TYPES
             ),
         })
     return rows
@@ -599,7 +599,7 @@ def _history_row_for(source: Source) -> dict:
             and not source.historical_cursor
         ),
         "can_backfill": bool(
-            spec and spec.url_template and source.type in NEWS_POLL_TYPES
+            spec and spec.url_template and source.type in LIST_POLL_TYPES
         ),
         "doc_count": cov.get("n") or 0,
     }
@@ -654,7 +654,7 @@ def crawler_history_all(request):
     """派發所有有歷史清單路徑的新聞來源。"""
     dispatched = []
     skipped = []
-    for source in Source.objects.filter(type__in=NEWS_POLL_TYPES).order_by("slug"):
+    for source in Source.objects.filter(type__in=LIST_POLL_TYPES).order_by("slug"):
         spec = get_archive_spec(source.slug)
         if spec is None or not spec.url_template:
             skipped.append(source.name)

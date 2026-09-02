@@ -8,11 +8,12 @@ from .html_list import (
     ChinaTimesListAdapter, CteeListAdapter, EttodayListAdapter,
     HtmlListAdapter, ListConfig, PtsListAdapter, UdnListAdapter,
 )
+from .control_yuan import ControlYuanListAdapter
 from .rss import RssAdapter
 
 __all__ = [
     "Adapter", "ParsedDocument", "get_adapter", "register_adapter",
     "RssAdapter", "HtmlListAdapter", "ListConfig",
     "UdnListAdapter", "ChinaTimesListAdapter", "CteeListAdapter",
-    "EttodayListAdapter", "PtsListAdapter",
+    "EttodayListAdapter", "PtsListAdapter", "ControlYuanListAdapter",
 ]

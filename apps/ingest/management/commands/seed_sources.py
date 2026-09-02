@@ -59,6 +59,17 @@ ARCHIVE_SPEC_SOURCES = [
 ]
 
 
+# 監察院四類公文（任務 57）。是**公文**，content_class 為 PUBLIC_RECORD
+# ——依著作權法第 9 條不得為著作權之標的，可全文公開，這是官方源相對
+# 新聞源的實質優勢。輪詢間隔設長：公文是低頻發布（彈劾案一年數十件）。
+CONTROL_YUAN_SOURCES = [
+    ("cy-investigation", "監察院－調查報告", 360),
+    ("cy-correction", "監察院－糾正案文", 360),
+    ("cy-censure", "監察院－糾舉案文", 720),
+    ("cy-impeachment", "監察院－彈劾案文", 720),
+]
+
+
 class Command(BaseCommand):
     help = "建立或更新初始採集來源（冪等）"
 
@@ -67,7 +78,7 @@ class Command(BaseCommand):
                             help="一併啟用需 Playwright 的來源")
 
     def _upsert(self, slug, *, name, type_, base_url, feed_url, interval,
-                enabled_on_create):
+                enabled_on_create, content_class=ContentClass.COPYRIGHTED):
         """``enabled`` 只在建立時套用，更新時絕不覆寫。
 
         2026-09-01 踩過的坑：先前 ``enabled`` 放在每次都套用的
@@ -79,7 +90,7 @@ class Command(BaseCommand):
         """
         defaults = {
             "name": name, "type": type_, "base_url": base_url,
-            "feed_url": feed_url, "content_class": ContentClass.COPYRIGHTED,
+            "feed_url": feed_url, "content_class": content_class,
             "poll_interval_minutes": interval,
         }
         return Source.objects.update_or_create(
@@ -128,6 +139,16 @@ class Command(BaseCommand):
             created_total += created
             updated_total += not created
             self.stdout.write(f"  {'＋' if created else '　'} {slug:<14} {name}　啟用（archive spec）")
+
+        for slug, name, interval in CONTROL_YUAN_SOURCES:
+            _, created = self._upsert(
+                slug, name=name, type_=SourceType.CY_SCRAPE,
+                base_url="https://www.cy.gov.tw", feed_url="",
+                interval=interval, enabled_on_create=True,
+                content_class=ContentClass.PUBLIC_RECORD)
+            created_total += created
+            updated_total += not created
+            self.stdout.write(f"  {'＋' if created else '　'} {slug:<14} {name}　啟用（公文）")
 
         self.stdout.write(self.style.SUCCESS(
             f"\n完成：新增 {created_total}、更新 {updated_total}，"

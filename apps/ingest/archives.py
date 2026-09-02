@@ -247,6 +247,33 @@ ARCHIVE_SPECS: dict[str, ArchiveSpec] = {
         pagesize=50,
         note="go-api /v2/posts 可走完整庫，實測 5922 篇、最早 2015-12-14",
     ),
+    # 監察院四類公文（任務 57）。分頁是真的，但頁碼過大會夾到最後
+    # 一頁並重複其內容——終止條件是「與前一頁相同」，不是「與第一頁
+    # 相同」（後者是公視那種繞回首頁的樣式）。
+    "cy-investigation": _spec(
+        slug="cy-investigation", kind=KIND_PAGE,
+        url_template="https://www.cy.gov.tw/CyBsBox.aspx?CSN=1&n=133&sms=0&page={page}",
+        adapter_slug="control-yuan", chunk_size=10, max_units=600,
+        note="調查報告。每頁 20 筆，清單即含案號與案由；正文為 DOCX／PDF 附件",
+    ),
+    "cy-correction": _spec(
+        slug="cy-correction", kind=KIND_PAGE,
+        url_template="https://www.cy.gov.tw/CyBsBox.aspx?CSN=2&n=134&sms=0&page={page}",
+        adapter_slug="control-yuan", chunk_size=10, max_units=600,
+        note="糾正案文。每頁 20 筆",
+    ),
+    "cy-censure": _spec(
+        slug="cy-censure", kind=KIND_PAGE,
+        url_template="https://www.cy.gov.tw/CyBsBox.aspx?CSN=3&n=136&sms=0&page={page}",
+        adapter_slug="control-yuan", chunk_size=10, max_units=600,
+        note="糾舉案文。每頁 20 筆",
+    ),
+    "cy-impeachment": _spec(
+        slug="cy-impeachment", kind=KIND_PAGE,
+        url_template="https://www.cy.gov.tw/CyBsBox.aspx?CSN=4&n=135&sms=0&page={page}",
+        adapter_slug="control-yuan", chunk_size=10, max_units=600,
+        note="彈劾案文。每頁 20 筆，實測 27 頁見底",
+    ),
     "mirrormedia": _spec(
         slug="mirrormedia", kind=KIND_OFFSET,
         url_template=(

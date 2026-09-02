@@ -27,6 +27,11 @@ from apps.ingest.services import ingest_source, mark_poll_started, should_poll
 #: 那條路已被月封存檔（``check_official_records``）取代。
 NEWS_POLL_TYPES = frozenset({SourceType.NEWS_RSS, SourceType.NEWS_SCRAPE})
 
+#: 走 ArchiveSpec 清單輪詢的所有型別。監察院雖是官方源，但取得方式
+#: 與新聞爬蟲相同（HTML 清單頁＋分頁），跟司法院那種需要登入下載
+#: 月封存檔的流程不同，因此走同一條路。
+LIST_POLL_TYPES = NEWS_POLL_TYPES | {SourceType.CY_SCRAPE}
+
 #: 補內文接力的鎖。TTL 要明顯長於單批耗時（實測 15–30 秒），
 #: 但短到 worker 掛掉後下一次 beat（10 分鐘）能接手。
 CHAIN_LOCK_KEY = "fill_bodies:chain"
@@ -120,7 +125,7 @@ def dispatch_poll(source: Source):
     """
     if source.slug in BROWSER_SOURCES:
         return browser_poll_source.delay(source.pk)
-    if source.type == SourceType.NEWS_SCRAPE:
+    if source.type in (SourceType.NEWS_SCRAPE, SourceType.CY_SCRAPE):
         return poll_source.delay(source.pk, adapter_slug=source.slug)
     if source.type == SourceType.NEWS_RSS:
         return poll_source.delay(source.pk)
@@ -142,7 +147,7 @@ def poll_due_sources() -> dict:
     只做派發不做抓取，讓單一來源的失敗或緩慢不影響其他來源。
     """
     dispatched = []
-    for source in Source.objects.filter(enabled=True, type__in=NEWS_POLL_TYPES):
+    for source in Source.objects.filter(enabled=True, type__in=LIST_POLL_TYPES):
         if not should_poll(source):
             continue
         mark_poll_started(source)
@@ -321,6 +326,6 @@ def dispatch_historical(source: Source):
     spec = get_archive_spec(source.slug)
     if spec is None:
         raise ValueError(f"「{source.name}」沒有歷史清單路徑")
-    if source.type not in NEWS_POLL_TYPES:
-        raise ValueError(f"「{source.name}」不是新聞來源，不走歷史新聞回補")
+    if source.type not in LIST_POLL_TYPES:
+        raise ValueError(f"「{source.name}」沒有可掃描的清單頁")
     return historical_backfill_source.delay(source.pk)

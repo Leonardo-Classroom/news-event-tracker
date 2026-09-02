@@ -160,6 +160,7 @@ def ingest_archive_chunk(
         cursor = initial_cursor(spec)
     # 只在單次任務內累計：跨任務的短暫失敗不該累加成「站台掛了」。
     consecutive_failures = 0
+    previous_fp = ""
 
     try:
         while result.units < limit:
@@ -210,6 +211,12 @@ def ingest_archive_chunk(
                     and fp and fp == cursor.first_fp):
                 result.done = True
                 break
+            # 有些站台頁碼過大不是回第一頁，而是「夾到最後一頁」並一直
+            # 重複它（監察院實測 page=99 與 page=27 相同）。只比對第一頁
+            # 指紋抓不到這種，會一路空轉到 max_units。
+            if fp and fp == previous_fp:
+                result.done = True
+                break
 
             if urls:
                 created, updated, skipped = upsert_parsed_documents(
@@ -221,6 +228,7 @@ def ingest_archive_chunk(
                 if spec.kind == KIND_PAGE and cursor.page == 1 and not cursor.first_fp:
                     cursor.first_fp = fp
 
+            previous_fp = fp
             cursor = advance_cursor(spec, cursor)
             result.units += 1
             result.cursor = cursor.to_json()

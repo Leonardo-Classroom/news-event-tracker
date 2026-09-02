@@ -19,7 +19,7 @@ from apps.ingest.archives import (
     fetch_archive_page, live_cursor, parse_archive_documents,
 )
 from apps.ingest.fetchers import FetchError, Fetcher, HttpFetcher
-from apps.ingest.models import Document, Source
+from apps.ingest.models import Document, Source, SourceType
 
 logger = logging.getLogger(__name__)
 
@@ -331,12 +331,19 @@ def fetch_document_body(
     # 結構化全文（報導者）。改打 API 比渲染瀏覽器快也穩定得多。
     api = BODY_API_SOURCES.get(document.source.slug)
     url = api[0](document.url) if api else document.url
+    # 監察院的正文是 DOCX／PDF 附件，內容頁只有選單——需要先抓內容頁
+    # 找出附件連結，再下載附件，因此抽取器要拿得到 fetcher。
+    is_control_yuan = document.source.type == SourceType.CY_SCRAPE
 
     try:
         response = fetcher.get(url)
         if not response.ok:
             raise FetchError(f"HTTP {response.status_code}")
-        if api:
+        if is_control_yuan:
+            from apps.ingest.control_yuan_body import extract_control_yuan_article
+            article = extract_control_yuan_article(
+                response.text, fetcher=fetcher, title=document.title)
+        elif api:
             article = api[1](response.text)
         else:
             article = extract_article(response.text, source_slug=document.source.slug)

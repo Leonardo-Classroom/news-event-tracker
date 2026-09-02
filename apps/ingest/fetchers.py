@@ -34,6 +34,9 @@ class FetchResult:
     status_code: int
     text: str
     headers: dict[str, str] = field(default_factory=dict)
+    #: 原始位元組。監察院的公文是 DOCX／PDF 附件，用 ``text`` 解碼
+    #: 會毀掉二進位內容，必須拿原始 bytes。文字來源不必理會這個欄位。
+    content: bytes = b""
 
     @property
     def ok(self) -> bool:
@@ -67,6 +70,7 @@ class HttpFetcher:
             status_code=resp.status_code,
             text=resp.text,
             headers=dict(resp.headers),
+            content=resp.content,
         )
 
     def post(self, url: str, *, json: dict | None = None,
@@ -98,8 +102,14 @@ class FakeFetcher:
         self.responses: dict[str, str | FetchResult] = responses or {}
         self.calls: list[str] = []
 
-    def register(self, url: str, body: str, status_code: int = 200) -> None:
-        self.responses[url] = FetchResult(url=url, status_code=status_code, text=body)
+    def register(self, url: str, body: str | bytes, status_code: int = 200) -> None:
+        if isinstance(body, bytes):
+            self.responses[url] = FetchResult(
+                url=url, status_code=status_code, text="", content=body)
+        else:
+            self.responses[url] = FetchResult(
+                url=url, status_code=status_code, text=body,
+                content=body.encode("utf-8"))
 
     def get(self, url: str, *, timeout: float = 30.0) -> FetchResult:
         self.calls.append(url)
@@ -108,7 +118,10 @@ class FakeFetcher:
         value = self.responses[url]
         if isinstance(value, FetchResult):
             return value
-        return FetchResult(url=url, status_code=200, text=value)
+        if isinstance(value, bytes):
+            return FetchResult(url=url, status_code=200, text="", content=value)
+        return FetchResult(url=url, status_code=200, text=value,
+                           content=value.encode("utf-8"))
 
     def post(self, url: str, *, json: dict | None = None,
              timeout: float = 30.0) -> FetchResult:
