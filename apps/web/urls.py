@@ -23,6 +23,7 @@ urlpatterns = [
     path("documents/", views.documents, name="documents"),
     path("documents/<int:pk>/", views.document_detail, name="document_detail"),
     path("pipeline/", views.pipeline, name="pipeline"),
+    path("rag/", views.rag_panel, name="rag"),
     path("crawlers/", views.crawlers, name="crawlers"),
     path("crawlers/history/", views.crawler_history_page, name="crawler_history_page"),
     path("crawlers/<slug:slug>/run/", views.crawler_run, name="crawler_run"),

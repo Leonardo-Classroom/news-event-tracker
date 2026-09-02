@@ -379,6 +379,11 @@ def pipeline(request):
         })
 
     total = Document.objects.count()
+    # **每個階段的分母都要是「進到這個階段的量」，不是各自方便的數字。**
+    # 先前向量化用 relevant 當分母，顯示 100%——但那把 93 萬篇連相關性
+    # 都還沒判的文件排除在外，看起來像整條管線都處理完了，實際上真正
+    # 的瓶頸（相關性判定只跑了 20%）完全看不出來。
+    assessed = Document.objects.filter(relevant__isnull=False).count()
     relevant = Document.objects.relevant().count()
     with_body = Document.objects.exclude(raw_body="").count()
     vectorised = Document.objects.exclude(embedding=None).count()
@@ -386,12 +391,72 @@ def pipeline(request):
 
     return render(request, "web/pipeline.html", {
         "nav": "pipeline", "rows": rows,
-        "total": total, "relevant": relevant,
+        "total": total, "assessed": assessed, "relevant": relevant,
         "with_body": with_body, "vectorised": vectorised,
         "fetched_today": today,
-        "relevant_pct": relevant / total * 100 if total else 0,
+        "pending_assessment": total - assessed,
         "body_pct": with_body / total * 100 if total else 0,
+        "assessed_pct": assessed / total * 100 if total else 0,
+        # 相關性只在已判定的範圍內才有意義——用全庫當分母會讓這個
+        # 比例隨著未判定的積壓變多而不斷下降，看起來像品質變差。
+        "relevant_pct": relevant / assessed * 100 if assessed else 0,
         "vector_pct": vectorised / relevant * 100 if relevant else 0,
+    })
+
+
+@require_role(Role.USER)
+def rag_panel(request):
+    """RAG 面板：檢索管線的可見度與線上試查。
+
+    **為什麼需要這一頁。** 檢索出問題時（例如「查柯文哲拿到的全是
+    三月宣判日、拿不到九月的二審開庭」），從外面完全看不出是哪個
+    通道的問題——是關鍵字沒命中、向量沒覆蓋、還是融合把它擠掉了。
+    這頁把每個通道各自撈到什麼攤開來比對。
+    """
+    from apps.retrieval.hybrid import HybridRetriever
+    from apps.retrieval.keyword import BigramFtsBackend
+
+    total = Document.objects.count()
+    vectorised = Document.objects.exclude(embedding=None).count()
+    relevant = Document.objects.relevant().count()
+    versions = (Document.objects.exclude(embedding_version="")
+                .values("embedding_version")
+                .annotate(n=Count("id")).order_by("-n")[:5])
+
+    query = request.GET.get("q", "").strip()
+    rows: list[dict] = []
+    channel_hits: dict[str, list] = {}
+    error = ""
+    if query:
+        base = (Document.objects.select_related("source")
+                .defer("raw_body", "embedding", "search_text"))
+        try:
+            fused = HybridRetriever().search(query, base=base, top_k=25)
+            docs = {d.pk: d for d in base.filter(
+                pk__in=[c.document_id for c in fused])}
+            rows = [{"doc": docs[c.document_id], "cand": c}
+                    for c in fused if c.document_id in docs]
+            # 單獨跑關鍵字通道，讓「融合後被擠掉的」看得出來
+            kw = BigramFtsBackend()
+            matched = kw.search(base, query, mode="any")
+            channel_hits = {
+                "keyword_total": matched.count(),
+                "keyword_newest": list(
+                    kw.rank(matched, query)
+                    .filter(published_at__isnull=False)[:300]),
+            }
+            channel_hits["keyword_newest"] = sorted(
+                channel_hits["keyword_newest"],
+                key=lambda d: d.published_at, reverse=True)[:8]
+        except Exception as exc:                   # noqa: BLE001
+            error = str(exc)
+
+    return render(request, "web/rag.html", {
+        "nav": "rag", "query": query, "rows": rows, "error": error,
+        "channel_hits": channel_hits,
+        "total": total, "vectorised": vectorised, "relevant": relevant,
+        "vector_pct": vectorised / relevant * 100 if relevant else 0,
+        "versions": versions,
     })
 
 

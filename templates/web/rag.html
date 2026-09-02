@@ -1,0 +1,104 @@
+{% extends "web/base.html" %}
+{% block title %}RAG 面板{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>RAG 面板</h1>
+  <span class="sub">檢索管線的覆蓋率與線上試查——看得出是哪個通道撈到（或漏掉）某篇文件</span>
+</div>
+
+<div class="grid c3">
+  <div class="card"><div class="stat">
+    <div class="label">可被檢索（已向量化）</div>
+    <div class="value">{{ vectorised|floatformat:0 }}</div>
+    <div class="note">佔判定為相關者 {{ vector_pct|floatformat:1 }}%　全庫共 {{ total|floatformat:0 }} 篇</div>
+    <div class="bar" style="margin-top:6px"><i style="width:{{ vector_pct }}%"></i></div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">關鍵字通道</div>
+    <div class="value">全庫</div>
+    <div class="note">bigram 全文索引，不需向量即可命中</div></div></div>
+  <div class="card"><div class="stat">
+    <div class="label">向量模型版本</div>
+    <div class="value" style="font-size:15px">
+      {% for v in versions %}{{ v.embedding_version }}{% if not forloop.last %} / {% endif %}{% empty %}—{% endfor %}</div>
+    <div class="note">{% for v in versions %}{{ v.n|floatformat:0 }} 篇{% if not forloop.last %}、{% endif %}{% endfor %}</div></div></div>
+</div>
+
+<p class="sub" style="margin:-4px 0 14px">
+  <b>兩個通道的覆蓋範圍不同</b>：關鍵字（bigram）對全庫都有效；向量只涵蓋已判定為相關並完成向量化的
+  {{ vectorised|floatformat:0 }} 篇。所以一篇沒向量化的文件仍可能被關鍵字撈到，反之則否——
+  查不到某篇時，先看它在下方哪個通道出現。
+</p>
+
+<div class="card">
+  <h2>線上試查</h2>
+  <div class="body">
+    <form method="get" class="chips" style="align-items:center">
+      <input name="q" value="{{ query }}" placeholder="輸入查詢，例如：京華城 二審"
+             style="flex:1;min-width:260px;padding:7px;border:1px solid var(--border-strong);
+                    border-radius:var(--radius);background:var(--surface);color:var(--text)">
+      <button class="btn primary">試查</button>
+    </form>
+    {% if error %}<p class="sub" style="color:var(--danger);margin-top:8px">{{ error }}</p>{% endif %}
+  </div>
+</div>
+
+{% if query %}
+<div class="card">
+  <h2>融合結果（RRF）<span style="font-weight:400;color:var(--text-3)">　— 依相關性排序，channels 欄顯示是哪些通道撈到的</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr>
+      <th class="num">#</th><th>文件</th><th>通道</th>
+      <th class="num">發布</th><th>向量</th><th>相關性</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="num tight mono">{{ forloop.counter }}</td>
+        <td class="tight"><a href="{% url 'web:document_detail' r.doc.pk %}" target="_blank" rel="noopener">{{ r.doc.title|truncatechars:56 }}</a>
+          <br><span style="color:var(--text-3);font-size:11px">{{ r.doc.source.name }}</span></td>
+        <td class="tight"><div class="chips">
+          {% for name, rank in r.cand.channels.items %}<span class="tag accent mono">{{ name }} #{{ rank }}</span>{% endfor %}
+        </div></td>
+        <td class="num tight mono">{% if r.doc.published_at %}{{ r.doc.published_at|date:"Y-m-d" }}{% else %}—{% endif %}</td>
+        <td class="tight">{% if r.doc.embedding_version %}<span class="tag ok">有</span>{% else %}<span class="tag muted">無</span>{% endif %}</td>
+        <td class="tight">{% if r.doc.relevant %}<span class="tag ok">相關</span>
+          {% elif r.doc.relevant is False %}<span class="tag muted">不相關</span>
+          {% else %}<span class="tag muted">未評估</span>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="empty">沒有命中</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>關鍵字通道裡最新的<span style="font-weight:400;color:var(--text-3)">　— 命中 {{ channel_hits.keyword_total|floatformat:0 }} 篇；相關性前 300 名中最新的幾筆</span></h2>
+  <div class="body">
+    <p class="sub" style="margin:0 0 10px">
+      這一區存在的理由：相關性最高的通常是報導最密集的那段時間，案件的<b>後續進展</b>會被擠到後面。
+      若這裡有而上面沒有，代表它被融合排序擠掉了，不是沒撈到。
+    </p>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th class="num">發布</th><th>文件</th><th>向量</th></tr></thead>
+      <tbody>
+      {% for d in channel_hits.keyword_newest %}
+        <tr>
+          <td class="num tight mono">{{ d.published_at|date:"Y-m-d" }}</td>
+          <td class="tight"><a href="{% url 'web:document_detail' d.pk %}" target="_blank" rel="noopener">{{ d.title|truncatechars:60 }}</a>
+            <br><span style="color:var(--text-3);font-size:11px">{{ d.source.name }}</span></td>
+          <td class="tight">{% if d.embedding_version %}<span class="tag ok">有</span>{% else %}<span class="tag muted">無</span>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" class="empty">沒有命中</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
