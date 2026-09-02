@@ -91,6 +91,12 @@ def events(request):
     })
 
 
+def _reassign_running(slug: str) -> bool:
+    from apps.events.reassign_tasks import is_running
+
+    return is_running(slug)
+
+
 @require_role(Role.USER)
 def event_detail(request, slug):
     """單一事件的時間線。**這是本系統最核心的畫面。**
@@ -138,6 +144,38 @@ def event_detail(request, slug):
         "silent_months": max(0, span_months - months),
         "sources": links.values("document__source__slug").distinct().count(),
         "pending_review": event.status in (EventStatus.CANDIDATE, EventStatus.DRAFT),
+        "reassign_running": _reassign_running(event.slug),
+    })
+
+
+@require_role(Role.ADMIN)
+@require_POST
+def event_reassign(request, slug):
+    """對單一事件重跑 L3 歸屬。新掛上的文件會自動觸發 L1 抽取。
+
+    以 fetch 呼叫、回 JSON——這是會花錢且要跑數分鐘的作業，按下之後
+    畫面要立刻反映「已開始」，整頁跳轉會讓人不確定有沒有按到。
+    """
+    from apps.events.reassign_tasks import is_running, lock_key, reassign_event
+    from django.core.cache import cache
+
+    event = get_object_or_404(Event, slug=slug)
+    if is_running(event.slug):
+        return JsonResponse({"running": True, "already": True})
+    cache.set(lock_key(event.slug), "1", 1200)
+    reassign_event.delay(event.slug)
+    return JsonResponse({"running": True})
+
+
+@require_role(Role.USER)
+def event_reassign_status(request, slug):
+    """給前端輪詢：是否還在跑、目前掛了幾篇。"""
+    from apps.events.reassign_tasks import is_running
+
+    event = get_object_or_404(Event, slug=slug)
+    return JsonResponse({
+        "running": is_running(event.slug),
+        "doc_count": event.event_documents.count(),
     })
 
 

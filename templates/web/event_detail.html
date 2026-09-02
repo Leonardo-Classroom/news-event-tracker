@@ -10,6 +10,14 @@
   {% if event.visibility == 'private' %}<span class="tag muted">未公開</span>
   {% elif event.visibility == 'public' %}<span class="tag ok">已公開</span>{% endif %}
   <span class="spacer"></span>
+  {% if request.user.is_staff %}
+    <button type="button" class="btn" id="btn-reassign"
+            data-url="{% url 'web:event_reassign' event.slug %}"
+            data-status="{% url 'web:event_reassign_status' event.slug %}"
+            {% if reassign_running %}disabled{% endif %}>重新歸屬文件</button>
+    <span class="tag accent" id="tag-reassign"
+          {% if not reassign_running %}hidden{% endif %}>歸屬中</span>
+  {% endif %}
   {% if pending_review %}
     <a href="{% url 'web:review_detail' event.slug %}" class="btn primary">審核此事件</a>
   {% elif request.user.is_staff %}
@@ -111,4 +119,42 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function() {
+  var b = document.getElementById("btn-reassign");
+  if (!b) return;
+  var tag = document.getElementById("tag-reassign");
+  var csrf = "{{ csrf_token }}";
+  var timer = null;
+
+  function poll() {
+    fetch(b.dataset.status)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        tag.hidden = !d.running;
+        b.disabled = d.running;
+        if (!d.running && timer) {
+          clearInterval(timer); timer = null;
+          // 歸屬完成後重載——新掛上的文件要出現在時間線與統計裡。
+          location.reload();
+        }
+      })
+      .catch(function() {});
+  }
+
+  b.addEventListener("click", function() {
+    // 這是會花錢的作業（每事件約 US$0.12），問一次再送。
+    if (!confirm("重新掃描全庫、把屬於這個案子的文件掛上來。\n" +
+                 "會呼叫 LLM（約 US$0.12），新掛上的文件也會自動做結構化抽取。\n繼續？")) return;
+    b.disabled = true;
+    tag.hidden = false;
+    fetch(b.dataset.url, {method: "POST", headers: {"X-CSRFToken": csrf}})
+      .then(function() { if (!timer) timer = setInterval(poll, 5000); });
+  });
+
+  {% if reassign_running %}timer = setInterval(poll, 5000);{% endif %}
+})();
+</script>
+
 {% endblock %}
