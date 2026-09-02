@@ -46,9 +46,7 @@
     {% if conversation %}
       <div class="eb-msgs" id="msgs">
         {% for m in messages_list %}
-          <div class="msg {{ m.role }}">{{ m.content|linebreaksbr }}
-            {% include "eventbuilder/_cited.html" with documents=m.cited %}
-          </div>
+          <div class="msg {{ m.role }}"><div class="msg-text">{{ m.content }}</div>{% include "eventbuilder/_cited.html" with documents=m.cited %}</div>
         {% empty %}
           <p class="empty">描述你想追蹤的案件——例如「我想追蹤新竹棒球場的弊案進度」。</p>
         {% endfor %}
@@ -81,14 +79,22 @@
   var area = form.querySelector("textarea");
   var button = form.querySelector("button");
 
+  // 泡泡分兩層：外層 .msg 只負責版面，內層 .msg-text 才有
+  // white-space: pre-wrap。文字若直接放外層，模板或 JS 插入節點時
+  // 的換行與縮排都會被當成真實空白渲染出來。
   function bubble(role, text) {
     var el = document.createElement("div");
     el.className = "msg " + role;
-    el.textContent = text;
+    var body = document.createElement("div");
+    body.className = "msg-text";
+    body.textContent = text;
+    el.appendChild(body);
     msgs.appendChild(el);
     msgs.scrollTop = msgs.scrollHeight;
     return el;
   }
+
+  function textOf(el) { return el.querySelector(".msg-text"); }
 
   // 逐字顯示。這是視覺效果，不是真的串流——回應是結構化 JSON
   // （reply 加 suggestions），邊解析未完成的 JSON 很脆弱，所以等
@@ -107,11 +113,12 @@
 
   function typeInto(el, text, cited) {
     stopTyping();
-    el.textContent = "";
+    var body = textOf(el);
+    body.textContent = "";
     // 尊重使用者的「減少動態效果」偏好——有些人會因動態不適。
     if (window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      el.textContent = text;
+      body.textContent = text;
       appendCited(el, cited);
       msgs.scrollTop = msgs.scrollHeight;
       return;
@@ -125,7 +132,7 @@
     var stick = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40;
     typing = setInterval(function() {
       i += step;
-      el.textContent = text.slice(0, i);
+      body.textContent = text.slice(0, i);
       if (stick) msgs.scrollTop = msgs.scrollHeight;
       if (i >= text.length) stopTyping();
     }, 20);
@@ -139,7 +146,7 @@
     // 中途被打斷時把整段補完，不要留半句話。
     var half = msgs.querySelector(".msg[data-full]");
     if (half) {
-      half.textContent = half.dataset.full;
+      textOf(half).textContent = half.dataset.full;
       delete half.dataset.full;
       var cited = half.dataset.cited;
       delete half.dataset.cited;
@@ -154,7 +161,7 @@
     area.value = "";
     bubble("user", text);
     var pending = bubble("assistant pending", "");
-    pending.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+    textOf(pending).innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
     button.disabled = true;
 
     var body = new FormData();
@@ -175,7 +182,7 @@
                   : res.status === 403 ? "登入已過期，請重新整理頁面"
                   : res.status === 404 ? "這個對話已不存在，請重新整理或建立新對話"
                   : "伺服器發生錯誤（HTTP " + res.status + "）";
-          pending.textContent = msg;
+          textOf(pending).textContent = msg;
           pending.className = "msg assistant error";
           return;
         }
@@ -189,7 +196,7 @@
       })
       .catch(function(e) {
         button.disabled = false;
-        pending.textContent = "連線失敗：" + e;
+        textOf(pending).textContent = "連線失敗：" + e;
         pending.className = "msg assistant error";
       });
   }

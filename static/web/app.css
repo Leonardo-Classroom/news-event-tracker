@@ -340,7 +340,10 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 .eb-msgs { flex: 1; overflow-y: auto; min-height: 0; display: flex;
       flex-direction: column; gap: 8px; padding-right: 4px; }
 .msg { max-width: 78%; padding: 8px 11px; border-radius: 12px;
-      white-space: pre-wrap; line-height: 1.6; font-size: 13px; }
+      line-height: 1.6; font-size: 13px; }
+/* pre-wrap 只作用在文字本身。放在 .msg 上的話，模板換行與 include
+   產生的空白都會被當成真實空白，在訊息下方留出一大塊空。 */
+.msg-text { white-space: pre-wrap; }
 .msg.user { align-self: flex-end; background: var(--danger-bg); color: var(--text); }
 .msg.assistant { align-self: flex-start; background: var(--surface-2); }
 .msg.pending { color: var(--text-3); }
