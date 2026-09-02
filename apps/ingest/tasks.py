@@ -27,6 +27,11 @@ from apps.ingest.services import ingest_source, mark_poll_started, should_poll
 #: 那條路已被月封存檔（``check_official_records``）取代。
 NEWS_POLL_TYPES = frozenset({SourceType.NEWS_RSS, SourceType.NEWS_SCRAPE})
 
+#: 補內文接力的鎖。TTL 要明顯長於單批耗時（實測 15–30 秒），
+#: 但短到 worker 掛掉後下一次 beat（10 分鐘）能接手。
+CHAIN_LOCK_KEY = "fill_bodies:chain"
+CHAIN_LOCK_TTL = 300
+
 logger = logging.getLogger(__name__)
 
 #: 各需渲染站台的行為差異。放設定而非程式分支，新增站台只需加一筆。
@@ -212,16 +217,45 @@ def browser_poll_source(source_id: int) -> dict:
     soft_time_limit=600,
     time_limit=660,
 )
-def fill_bodies(limit: int = 100) -> dict:
-    """補齊缺內文的文件。
+def fill_bodies(limit: int = 100, chain: bool = True,
+                resume: bool = False) -> dict:
+    """補齊缺內文的文件，並在還有工作時自己重新入列。
 
     全文是 L1 抽取、向量檢索、轉載歸併與時間線的共同前提——
     清單頁只給標題，實測標題僅約 21 個 bigram，不足以支撐任何後續處理。
     冪等：已有內文者直接跳過。
+
+    **為什麼是自己接自己，而不是把 limit 調大。** 兩者的每秒請求數
+    一樣（單執行緒依序抓，實測約 5 req/s），差別只在「要不要停」。
+    固定排程每 10 分鐘做 100 篇，積壓 90 萬篇要 63 天；接力則是做完
+    一批立刻接下一批，直到沒有可做的為止（實測約 2–3 天）。
+
+    終止條件靠 ``MAX_BODY_ATTEMPTS``：抓不到的文件累計失敗達上限後
+    退出佇列，因此 ``attempted == 0`` 一定會發生，不會無限接力。
+
+    **鎖是必要的，不是保險。** Beat 仍每 10 分鐘派一次（當接力因
+    worker 重啟而斷掉時要能自動接回去），但接力本身不會停——沒有鎖
+    的話每次 beat 都會再長出一條鏈，8 個 worker 就變成 8 倍請求量。
+    鎖有 TTL 且每一棒續約，所以鏈條若整個死掉，下一次 beat 會接手。
     """
+    from django.core.cache import cache
+
     from apps.ingest.services import fill_missing_bodies
 
+    if chain and not resume:
+        if not cache.add(CHAIN_LOCK_KEY, "1", CHAIN_LOCK_TTL):
+            logger.info("已有補內文接力在進行，這次不重複啟動")
+            return {"skipped": True}
+
     result = fill_missing_bodies(limit=limit)
+
+    if chain:
+        if result.attempted:
+            cache.touch(CHAIN_LOCK_KEY, CHAIN_LOCK_TTL)      # 續約
+            fill_bodies.delay(limit, chain=True, resume=True)
+        else:
+            cache.delete(CHAIN_LOCK_KEY)                     # 沒工作了，放掉
+
     return {"attempted": result.attempted, "filled": result.filled,
             "failed": result.failed}
 

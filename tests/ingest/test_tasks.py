@@ -124,3 +124,70 @@ class TestDispatchPoll:
             poll_due_sources()
         slugs = [c.args[0].slug for c in mocked.call_args_list]
         assert official_source.slug not in slugs
+
+
+@pytest.mark.medium
+class TestFillBodiesChain:
+    """接力必須只有一條。Beat 每 10 分鐘仍會派工（斷掉時要能接回去），
+    沒有鎖的話每次都會再長出一條鏈，8 個 worker 就是 8 倍請求量。"""
+
+    def setup_method(self):
+        from django.core.cache import cache
+        from apps.ingest.tasks import CHAIN_LOCK_KEY
+        cache.delete(CHAIN_LOCK_KEY)
+
+    def test_還有工作時自己接下一棒(self, db):
+        from apps.ingest.tasks import fill_bodies
+        with patch("apps.ingest.services.fill_missing_bodies") as mocked, \
+             patch.object(fill_bodies, "delay") as delayed:
+            mocked.return_value.attempted = 100
+            mocked.return_value.filled = 70
+            mocked.return_value.failed = 30
+            fill_bodies(100)
+        delayed.assert_called_once_with(100, chain=True, resume=True)
+
+    def test_沒工作就停止並放掉鎖(self, db):
+        from django.core.cache import cache
+        from apps.ingest.tasks import CHAIN_LOCK_KEY, fill_bodies
+        with patch("apps.ingest.services.fill_missing_bodies") as mocked, \
+             patch.object(fill_bodies, "delay") as delayed:
+            mocked.return_value.attempted = 0
+            mocked.return_value.filled = 0
+            mocked.return_value.failed = 0
+            fill_bodies(100)
+        delayed.assert_not_called()
+        assert cache.get(CHAIN_LOCK_KEY) is None
+
+    def test_已有接力在跑時不重複啟動(self, db):
+        from django.core.cache import cache
+        from apps.ingest.tasks import CHAIN_LOCK_KEY, fill_bodies
+        cache.add(CHAIN_LOCK_KEY, "1", 300)
+        with patch("apps.ingest.services.fill_missing_bodies") as mocked:
+            out = fill_bodies(100)
+        mocked.assert_not_called()
+        assert out == {"skipped": True}
+
+    def test_接下一棒不需要重新取鎖(self, db):
+        """鏈條中的每一棒都帶 resume=True——若還要搶鎖就會被自己擋住。"""
+        from django.core.cache import cache
+        from apps.ingest.tasks import CHAIN_LOCK_KEY, fill_bodies
+        cache.add(CHAIN_LOCK_KEY, "1", 300)
+        with patch("apps.ingest.services.fill_missing_bodies") as mocked, \
+             patch.object(fill_bodies, "delay") as delayed:
+            mocked.return_value.attempted = 100
+            mocked.return_value.filled = 70
+            mocked.return_value.failed = 30
+            fill_bodies(100, resume=True)
+        delayed.assert_called_once()
+
+    def test_chain關閉時不派下一棒也不動鎖(self, db):
+        from django.core.cache import cache
+        from apps.ingest.tasks import CHAIN_LOCK_KEY, fill_bodies
+        with patch("apps.ingest.services.fill_missing_bodies") as mocked, \
+             patch.object(fill_bodies, "delay") as delayed:
+            mocked.return_value.attempted = 100
+            mocked.return_value.filled = 70
+            mocked.return_value.failed = 30
+            fill_bodies(100, chain=False)
+        delayed.assert_not_called()
+        assert cache.get(CHAIN_LOCK_KEY) is None

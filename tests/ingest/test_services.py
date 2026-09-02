@@ -378,3 +378,63 @@ class TestFillMissingPublishedAt:
         assert result.failed == 0
         assert doc.published_at == dt.datetime(
             2026, 8, 31, 0, 35, 27, tzinfo=dt.timezone.utc)
+
+
+@pytest.mark.medium
+class TestBodyAttempts:
+    """抓不到的文件必須退出佇列，否則補內文永遠卡在隊首那批死文件。
+
+    實測背景：取件順序固定為「缺內文、依 -published_at」，失敗的不會
+    離開，結果同一個網址被重抓了 430 次，後面的文件永遠輪不到。
+    """
+
+    def test_失敗會累計次數(self, source):
+        from apps.ingest.models import ContentClass, Document
+        from apps.ingest.services import fetch_document_body
+
+        doc = Document.objects.create(
+            source=source, url="https://example.test/dead",
+            title="抓不到", content_class=ContentClass.COPYRIGHTED,
+        )
+        assert fetch_document_body(doc, fetcher=FakeFetcher()) is False
+        doc.refresh_from_db()
+        assert doc.body_attempts == 1
+
+    def test_達上限後不再被取出(self, source):
+        from apps.ingest.models import ContentClass, Document
+        from apps.ingest.services import MAX_BODY_ATTEMPTS, fill_missing_bodies
+
+        Document.objects.create(
+            source=source, url="https://example.test/dead",
+            title="抓不到", content_class=ContentClass.COPYRIGHTED,
+            body_attempts=MAX_BODY_ATTEMPTS,
+        )
+        result = fill_missing_bodies(limit=10, fetcher=FakeFetcher())
+        assert result.attempted == 0
+
+    def test_未達上限仍會重試(self, source):
+        from apps.ingest.models import ContentClass, Document
+        from apps.ingest.services import MAX_BODY_ATTEMPTS, fill_missing_bodies
+
+        Document.objects.create(
+            source=source, url="https://example.test/maybe",
+            title="暫時失敗", content_class=ContentClass.COPYRIGHTED,
+            body_attempts=MAX_BODY_ATTEMPTS - 1,
+        )
+        result = fill_missing_bodies(limit=10, fetcher=FakeFetcher())
+        assert result.attempted == 1
+
+    def test_成功後不留下失敗計數(self, source):
+        from apps.ingest.models import ContentClass, Document
+        from apps.ingest.services import fetch_document_body
+
+        doc = Document.objects.create(
+            source=source, url="https://example.test/ok",
+            title="正常", content_class=ContentClass.COPYRIGHTED,
+        )
+        html = ('<html><head><script type="application/ld+json">'
+                '{"@type":"NewsArticle","articleBody":"' + "內文" * 60 + '"}'
+                '</script></head><body></body></html>')
+        assert fetch_document_body(doc, fetcher=FakeFetcher({doc.url: html})) is True
+        doc.refresh_from_db()
+        assert doc.raw_body and doc.body_attempts == 0

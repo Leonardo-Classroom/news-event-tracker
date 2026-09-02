@@ -140,6 +140,16 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+
+# 跨行程共用的鎖需要真的共用——預設的 LocMemCache 每個 worker 各一份，
+# 拿它當鎖等於沒鎖。Redis 本來就在跑（broker db0、result db1），
+# 這裡用 db2。Django 4 起內建 RedisCache，不需要額外套件。
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("DJANGO_CACHE_URL", "redis://localhost:6379/2"),
+    }
+}
 CELERY_TASK_ACKS_LATE = True           # 被硬殺的任務重新入列（要求任務冪等）
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # 長任務不預取，避免卡住的 worker 囤積任務

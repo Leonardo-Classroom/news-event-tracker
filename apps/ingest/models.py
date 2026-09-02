@@ -179,6 +179,11 @@ class Document(models.Model):
         blank=True,
         help_text="原始全文。content_class=copyrighted 時永不對外序列化。",
     )
+    #: 內文抓取失敗次數。達 MAX_BODY_ATTEMPTS 即不再嘗試——
+    #: 有些文件是永遠抓不到的（HTTP 410、會員限定、內文由 JS 載入），
+    #: 沒有這個計數，補內文的佇列會永遠卡在同一批死文件上重抓
+    #: （實測有單一網址被重抓 430 次）。
+    body_attempts = models.PositiveSmallIntegerField(default=0)
 
     content_class = models.CharField(max_length=32, choices=ContentClass.choices)
 

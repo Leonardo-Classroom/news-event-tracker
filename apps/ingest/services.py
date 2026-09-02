@@ -34,6 +34,12 @@ BACKOFF_MULTIPLIER = 6
 #: 與卡死分開。
 IN_PROGRESS_STALE = dt.timedelta(minutes=20)
 
+#: 內文抓取連續失敗幾次後不再嘗試。
+#: 有些文件是永遠抓不到的（HTTP 410、會員限定、內文由 JS 載入）。
+#: 沒有上限的話，補內文的佇列（依 -published_at 取前 N 筆）會永遠卡在
+#: 同一批死文件上——實測有單一網址被重抓 430 次。
+MAX_BODY_ATTEMPTS = 3
+
 #: 分頁／offset 走訪的即時輪詢一次最多翻幾頁。安全上限，不是效能
 #: 調校——沒有這個上限，一個從沒被抓過的新來源（資料庫裡完全沒有
 #: 既有 URL 可比對）會被單次即時輪詢當成整站歷史來爬，可能撐爆
@@ -335,7 +341,11 @@ def fetch_document_body(
         else:
             article = extract_article(response.text, source_slug=document.source.slug)
     except (FetchError, ValueError) as exc:
-        logger.warning("內頁抓取失敗 %s：%s", url, exc)
+        # 記錄失敗次數，讓永遠抓不到的文件退出佇列（見 MAX_BODY_ATTEMPTS）
+        document.body_attempts = (document.body_attempts or 0) + 1
+        document.save(update_fields=["body_attempts"])
+        logger.warning("內頁抓取失敗（第 %d 次）%s：%s",
+                       document.body_attempts, url, exc)
         return False
 
     document.raw_body = article.body
@@ -415,11 +425,15 @@ def fill_missing_bodies(
 
     全文是 L1 抽取、向量檢索、SimHash 去重與時間線的共同前提——
     清單頁只給標題，實測標題僅約 21 個 bigram，SimHash 幾乎全是雜訊。
+
+    排除已達 ``MAX_BODY_ATTEMPTS`` 的文件。這個排除是佇列能往前走的
+    前提：取件順序固定為「缺內文、依 -published_at」，抓不到的文件
+    若不退場就會永遠佔住隊首，後面的永遠輪不到。
     """
     from apps.ingest.article import NEEDS_BROWSER
 
     queryset = (Document.objects.select_related("source")
-                .filter(raw_body="")
+                .filter(raw_body="", body_attempts__lt=MAX_BODY_ATTEMPTS)
                 .exclude(source__slug__in=NEEDS_BROWSER)
                 .order_by("-published_at"))
     if source_slug:
