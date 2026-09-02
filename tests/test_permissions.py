@@ -145,3 +145,21 @@ class TestViewLevelEnforcement:
         client = Client()
         response = client.get("/crawlers/")
         assert response.status_code == 302
+
+
+@pytest.mark.medium
+class TestPublicSiteLink:
+    def test_側欄有公開頁入口且開新分頁(self, client, django_user_model):
+        """公開頁是給讀者看的另一個站，不該把正在操作的內部頁面蓋掉。"""
+        user = django_user_model.objects.create_user("viewer", password="x")
+        client.force_login(user)
+        html = client.get("/").content.decode()
+        assert 'class="brand-public"' in html
+        assert 'href="/case/"' in html
+        assert 'target="_blank"' in html
+        assert 'rel="noopener"' in html
+
+    def test_未登入的頁面不顯示側欄(self, client):
+        """側欄整塊在 is_authenticated 之內，公開頁入口也一樣。"""
+        html = client.get("/login/").content.decode()
+        assert 'class="brand-public"' not in html

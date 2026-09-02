@@ -13,6 +13,9 @@
     <div class="brand">
       <b>新聞事件追蹤</b>
       <span>新聞停了，追蹤沒停</span>
+      {# 開新分頁：這是給讀者看的另一個站，不該把正在操作的內部頁面蓋掉 #}
+      <a class="brand-public" href="{% url 'public:case_list' %}"
+         target="_blank" rel="noopener">前往公開頁 ↗</a>
     </div>
     <div class="nav">
       <div class="nav-group">

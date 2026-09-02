@@ -112,6 +112,11 @@ a:hover { text-decoration: underline; }
 }
 .brand b { display: block; font-size: 13px; letter-spacing: 0.02em; }
 .brand span { color: var(--text-3); font-size: 11px; }
+/* 公開頁入口。刻意不做成 nav 項目——那些是內部工具的頁面，這個是
+   離開內部工具、去看讀者看到的東西，性質不同。 */
+.brand-public { display: inline-block; margin-top: 8px; font-size: 11px;
+      color: var(--text-2); }
+.brand-public:hover { color: var(--text); }
 
 .nav-group { padding: 8px 0; }
 .nav-group > h6 {
