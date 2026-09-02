@@ -279,7 +279,11 @@
   var maxH = 160;
   function autoGrow() {
     area.style.height = "auto";
-    area.style.height = Math.min(area.scrollHeight, maxH) + "px";
+    // 取 CSS 定義的單行高當下限——直接用 scrollHeight 會比 CSS 的
+    // min-height 略小，送出鈕就跟輸入框差幾像素對不齊。
+    var min = parseFloat(getComputedStyle(area).minHeight) || 0;
+    var h = Math.max(min, Math.min(area.scrollHeight, maxH));
+    area.style.height = h + "px";
     area.style.overflowY = area.scrollHeight > maxH ? "auto" : "hidden";
   }
   area.addEventListener("input", autoGrow);
