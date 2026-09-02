@@ -304,8 +304,14 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 /* ── 建立事件（任務 63）────────────────────────────────────
    三欄：對話清單／對話／候選事件。高度用 vh 而非 100%，
    因為父層沒有固定高度，百分比會塌成 0。 */
+/* .main 的 padding-bottom 是 60px，那是給會捲動的長列表留的收尾
+   空白。這頁是固定高度的三欄版面，那 60px 只會變成底部一大塊空白，
+   因此只在這一頁收掉——用 :has() 而不是在模板加 class，是為了讓
+   「為什麼收掉」跟版面定義寫在一起。
+   90px = .main 上下 padding(18+18) + .page-head 高度(約 51)。 */
+.main:has(.eb) { padding-bottom: 18px; }
 .eb { display: grid; grid-template-columns: 220px 1fr 300px;
-      gap: 12px; height: calc(100vh - 150px); min-height: 420px; }
+      gap: 12px; height: calc(100vh - 90px); min-height: 420px; }
 .eb aside, .eb section { background: var(--surface);
       border: 1px solid var(--border); border-radius: var(--radius);
       display: flex; flex-direction: column; min-height: 0; }
@@ -359,6 +365,9 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
 .sug-foot { margin-top: 8px; }
 
 @media (max-width: 1100px) {
+  /* 窄螢幕改成上下堆疊，變回會捲動的版面——這時 .main 的收尾空白
+     要加回來，否則最後一欄會貼著視窗底部。 */
+  .main:has(.eb) { padding-bottom: 60px; }
   .eb { grid-template-columns: 1fr; height: auto; }
   .eb-msgs { max-height: 50vh; }
 }
