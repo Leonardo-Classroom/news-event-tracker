@@ -244,6 +244,7 @@ def apply_assignments(results: list[AssignmentResult]) -> int:
     風險分級與最後進展時間。回傳寫入筆數。
     """
     created = 0
+    new_ids: list[int] = []
     touched_events: dict[int, Event] = {}
     for r in results:
         _, was_created = EventDocument.objects.get_or_create(
@@ -252,9 +253,18 @@ def apply_assignments(results: list[AssignmentResult]) -> int:
         )
         if was_created:
             created += 1
+            new_ids.append(r.document_id)
             touched_events[r.event.pk] = r.event
 
     for event in touched_events.values():
         event.recompute_risk_tier(save=True)
+
+    # **剛歸屬進來的文件才做 L1。** 抽取的三個消費者（風險分級、
+    # 措辭檢查的 is_final、L4 時間線）都只作用在事件的文件上，
+    # 對其餘文件抽取的結果沒有任何消費者。順序上 L3 在前是刻意的：
+    # L3 每篇只讀摘要、20 篇一批，單篇成本是 L1 的 1/18。
+    if new_ids:
+        from apps.extract.tasks import extract_for_documents
+        extract_for_documents.delay(new_ids)
 
     return created
