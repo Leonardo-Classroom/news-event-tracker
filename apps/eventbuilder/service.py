@@ -23,6 +23,7 @@ from apps.eventbuilder.models import Conversation, EventSuggestion, Message, Rol
 from apps.ingest.models import Document
 from apps.llm.models import LlmPurpose
 from apps.llm.provider import LlmError, get_provider
+from apps.retrieval.hybrid import HybridRetriever
 from apps.retrieval.keyword import BigramFtsBackend
 
 logger = logging.getLogger(__name__)
@@ -107,27 +108,90 @@ def _existing_titles(conversation: Conversation) -> list[str]:
 _DOC_CANDIDATES = 12
 
 
-def retrieve_candidates(text: str, *, limit: int = _DOC_CANDIDATES) -> list[Document]:
-    """從館藏找出與這句話相關的文件。
+#: 候選裡保留幾筆給「最新」。相關性最高的通常是報導最密集的那段
+#: 時間（京華城案實測前三筆全是宣判日 2026-03-26），使用者問
+#: 「有沒有新一點的」時，純靠相關性排序永遠拿不到後續進展——而
+#: 後續進展正是這個系統存在的理由。
+_RECENT_SLOTS = 4
 
-    用 ``mode="any"`` 加 ``rank`` 而非 ``all``：使用者是用自然語言
-    描述案件，逐詞 AND 幾乎必定 0 筆。寬鬆比對會命中很多，因此
-    ``rank`` 不是可選的——沒有相關性排序就只能靠截斷，而截斷什麼
-    都不看（任務 19 的實測結論）。
+#: 取「最新」之前，先用相關性篩出多大的池子。太小會退化成純相關性
+#: 排序（拿不到後續進展），太大會讓不相關的新文章混進來。
+_RECENT_POOL = 300
+
+
+def conversation_query(conversation: Conversation, text: str) -> str:
+    """用對話脈絡組查詢，不是只用最後一則訊息。
+
+    **這是實測發現的缺陷**：使用者的追問常常沒有任何主題詞
+    （「有沒有新一點的新聞」「都行，看看近期的」），只拿那句話去
+    檢索會撈到除濕機與客語電影，AI 於是回答「館藏沒有相關報導」
+    ——但那是因為我們根本沒把相關文件給它。
+    """
+    recent = [m.content for m in
+              conversation.messages.filter(role=Role.USER)
+              .order_by("-created_at", "-id")[:3]]
+    recent.reverse()
+    parts = recent + [text]
+    # 去重並保持順序：連續追問常有重複字眼，重複只會稀釋查詢。
+    seen, out = set(), []
+    for p in parts:
+        p = (p or "").strip()
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return " ".join(out)[:500]
+
+
+def retrieve_candidates(text: str, *, limit: int = _DOC_CANDIDATES) -> list[Document]:
+    """從館藏找出相關文件：相關性為主，但保留名額給最新的。
+
+    走 ``HybridRetriever``（向量＋關鍵字 RRF 融合）而非只有關鍵字：
+    bigram 是字面比對，「不利於民進黨」不會命中「某綠營人士涉貪」
+    這類語意相關但用詞不同的文件。向量通道正是為此存在。
     """
     text = (text or "").strip()
     if not text:
         return []
-    backend = BigramFtsBackend()
     base = Document.objects.exclude(raw_body="").select_related("source")
+    ranked: list[Document] = []
+    newest: list[Document] = []
+
     try:
-        hits = backend.search(base, text, mode="any")
-        hits = backend.rank(hits, text)
-        return list(hits[:limit])
+        hits = HybridRetriever().search(text, base=base, top_k=limit * 4)
+        ids = [c.document_id for c in hits]
+        by_id = {d.pk: d for d in base.filter(pk__in=ids)}
+        ranked = [by_id[i] for i in ids if i in by_id]
     except Exception as exc:                       # noqa: BLE001
         # 檢索失敗不該讓整輪對話失敗——沒有推薦新聞仍然可以討論。
-        logger.warning("建立事件的館藏檢索失敗：%s", exc)
+        logger.warning("建立事件的相關性檢索失敗：%s", exc)
+
+    # **最新的必須從「命中集合」取，不能從已排序截斷的前段取。**
+    # 實測：黃景茂涉京華城案判 6 年半（2026-09-02）確實命中關鍵字
+    # 通道，卻排在 RRF 前 48 名之外——若只從前段挑最新，這種「案件
+    # 的最新進展」永遠浮不上來，而那正是本系統存在的理由。
+    try:
+        keyword = BigramFtsBackend()
+        matched = keyword.search(base, text, mode="any")
+        # **先用相關性篩出池子，再在池子裡取最新。** 直接對命中集合
+        # 按日期排序是行不通的：mode="any" 會命中任何字面沾到邊的
+        # 文件，取最新等於「最近入庫的任何新聞」——實測撈到 YouTube
+        # 廣告與 C 肝群聚。ts_rank 前段才是真的相關。
+        pool = list(keyword.rank(matched, text)
+                    .filter(published_at__isnull=False)[:_RECENT_POOL])
+        pool.sort(key=lambda d: d.published_at, reverse=True)
+        newest = pool[:_RECENT_SLOTS]
+    except Exception as exc:                       # noqa: BLE001
+        logger.warning("建立事件的最新報導檢索失敗：%s", exc)
+
+    if not ranked and not newest:
         return []
+
+    merged, seen = [], set()
+    for doc in newest + ranked:          # 最新的排前面
+        if doc.pk not in seen:
+            seen.add(doc.pk)
+            merged.append(doc)
+    return merged[:limit]
 
 
 def _candidate_block(documents: list[Document]) -> str:
@@ -135,7 +199,8 @@ def _candidate_block(documents: list[Document]) -> str:
     for doc in documents:
         when = doc.published_at.strftime("%Y-%m-%d") if doc.published_at else "日期不明"
         lines.append(f"{doc.pk}｜{when}｜{doc.source.name}｜{doc.title}")
-    return "館藏文件（只能引用這些編號）：\n" + "\n".join(lines)
+    return ("館藏文件（只能引用這些編號，已含最新報導）：\n"
+            + "\n".join(lines))
 
 
 #: 模型偶爾會回傳截斷或非 JSON 的內容（2026-09-03 實測：同一個 prompt
@@ -210,7 +275,7 @@ def send_message(conversation: Conversation, text: str, *, provider=None) -> Tur
             "role": "system",
             "content": "使用者已看過這些候選事件，不要重複提出：" + "、".join(seen),
         })
-    candidates = retrieve_candidates(text)
+    candidates = retrieve_candidates(conversation_query(conversation, text))
     if candidates:
         messages.append({"role": "system",
                          "content": _candidate_block(candidates)})

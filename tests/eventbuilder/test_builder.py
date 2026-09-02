@@ -401,3 +401,47 @@ class TestTrashModal:
         conversation.trash()
         r = client.post(f"/build/c/{conversation.pk}/restore/")
         assert r.status_code == 302
+
+
+@pytest.mark.medium
+class TestRetrievalContext:
+    """檢索的兩個實測缺陷：只看最後一則訊息、只看相關性不看時間。"""
+
+    def test_查詢帶入對話脈絡(self, conversation):
+        """「有沒有新一點的新聞」本身沒有主題詞，只拿它去檢索會撈到
+        除濕機與客語電影，AI 於是說「館藏沒有相關報導」。"""
+        from apps.eventbuilder.service import conversation_query
+
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="那有關柯P的案件呢")
+        query = conversation_query(conversation, "有沒有新一點的新聞")
+        assert "柯P" in query
+        assert "有沒有新一點的新聞" in query
+
+    def test_脈絡去重(self, conversation):
+        from apps.eventbuilder.service import conversation_query
+
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="京華城")
+        query = conversation_query(conversation, "京華城")
+        assert query.count("京華城") == 1
+
+    def test_只取最近幾則不無限累積(self, conversation):
+        from apps.eventbuilder.service import conversation_query
+
+        for i in range(10):
+            Message.objects.create(conversation=conversation, role=Role.USER,
+                                   content=f"訊息{i}")
+        query = conversation_query(conversation, "最新")
+        assert "訊息0" not in query
+        assert "訊息9" in query
+
+    def test_送出時用的是脈絡查詢(self, conversation):
+        Message.objects.create(conversation=conversation, role=Role.USER,
+                               content="柯文哲京華城案")
+        with patch("apps.eventbuilder.service.retrieve_candidates",
+                   return_value=[]) as mocked:
+            send_message(conversation, "有沒有新一點的",
+                         provider=FakeProvider([TURN, "標題"]))
+        used = mocked.call_args[0][0]
+        assert "柯文哲京華城案" in used
