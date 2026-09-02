@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>RAG 面板</h1>
-  <span class="sub">檢索管線的覆蓋率與線上試查——看得出是哪個通道撈到（或漏掉）某篇文件</span>
+  <span class="sub">檢索管線的覆蓋率與前處理作業——文件查詢請用「文件」頁</span>
 </div>
 
 <div class="grid c3">
@@ -39,6 +39,7 @@
                   {% if relevance_running %}disabled{% endif %}>開始判定相關性</button>
           <span class="tag accent" id="tag-relevance"
                 {% if not relevance_running %}hidden{% endif %}>執行中</span>
+          <span class="sub mono" id="rate-relevance"></span>
         </div>
       </div>
       <div>
@@ -53,6 +54,7 @@
                   {% if embed_running %}disabled{% endif %}>開始向量化</button>
           <span class="tag accent" id="tag-embed"
                 {% if not embed_running %}hidden{% endif %}>執行中</span>
+          <span class="sub mono" id="rate-embed"></span>
         </div>
       </div>
     </div>
@@ -70,120 +72,80 @@
   查不到某篇時，先看它在下方哪個通道出現。
 </p>
 
-<div class="card">
-  <h2>線上試查</h2>
-  <div class="body">
-    <form method="get" class="chips" style="align-items:center">
-      <input name="q" value="{{ query }}" placeholder="輸入查詢，例如：京華城 二審"
-             style="flex:1;min-width:260px;padding:7px;border:1px solid var(--border-strong);
-                    border-radius:var(--radius);background:var(--surface);color:var(--text)">
-      <button class="btn primary">試查</button>
-    </form>
-    {% if error %}<p class="sub" style="color:var(--danger);margin-top:8px">{{ error }}</p>{% endif %}
-  </div>
-</div>
-
-{% if query %}
-<div class="card">
-  <h2>融合結果（RRF）<span style="font-weight:400;color:var(--text-3)">　— 依相關性排序，channels 欄顯示是哪些通道撈到的</span></h2>
-  <div class="table-scroll">
-  <table>
-    <thead><tr>
-      <th class="num">#</th><th>文件</th><th>通道</th>
-      <th class="num">發布</th><th>向量</th><th>相關性</th>
-    </tr></thead>
-    <tbody>
-    {% for r in rows %}
-      <tr>
-        <td class="num tight mono">{{ forloop.counter }}</td>
-        <td class="tight"><a href="{% url 'web:document_detail' r.doc.pk %}" target="_blank" rel="noopener">{{ r.doc.title|truncatechars:56 }}</a>
-          <br><span style="color:var(--text-3);font-size:11px">{{ r.doc.source.name }}</span></td>
-        <td class="tight"><div class="chips">
-          {% for name, rank in r.cand.channels.items %}<span class="tag accent mono">{{ name }} #{{ rank }}</span>{% endfor %}
-        </div></td>
-        <td class="num tight mono">{% if r.doc.published_at %}{{ r.doc.published_at|date:"Y-m-d" }}{% else %}—{% endif %}</td>
-        <td class="tight">{% if r.doc.embedding_version %}<span class="tag ok">有</span>{% else %}<span class="tag muted">無</span>{% endif %}</td>
-        <td class="tight">{% if r.doc.relevant %}<span class="tag ok">相關</span>
-          {% elif r.doc.relevant is False %}<span class="tag muted">不相關</span>
-          {% else %}<span class="tag muted">未評估</span>{% endif %}</td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="6" class="empty">沒有命中</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</div>
-
-<div class="card">
-  <h2>關鍵字通道裡最新的<span style="font-weight:400;color:var(--text-3)">　— 命中 {{ channel_hits.keyword_total|floatformat:0 }} 篇；相關性前 300 名中最新的幾筆</span></h2>
-  <div class="body">
-    <p class="sub" style="margin:0 0 10px">
-      這一區存在的理由：相關性最高的通常是報導最密集的那段時間，案件的<b>後續進展</b>會被擠到後面。
-      若這裡有而上面沒有，代表它被融合排序擠掉了，不是沒撈到。
-    </p>
-    <div class="table-scroll">
-    <table>
-      <thead><tr><th class="num">發布</th><th>文件</th><th>向量</th></tr></thead>
-      <tbody>
-      {% for d in channel_hits.keyword_newest %}
-        <tr>
-          <td class="num tight mono">{{ d.published_at|date:"Y-m-d" }}</td>
-          <td class="tight"><a href="{% url 'web:document_detail' d.pk %}" target="_blank" rel="noopener">{{ d.title|truncatechars:60 }}</a>
-            <br><span style="color:var(--text-3);font-size:11px">{{ d.source.name }}</span></td>
-          <td class="tight">{% if d.embedding_version %}<span class="tag ok">有</span>{% else %}<span class="tag muted">無</span>{% endif %}</td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="3" class="empty">沒有命中</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </div>
-</div>
-{% endif %}
 <script>
 (function() {
   var csrf = "{{ csrf_token }}";
-  function bind(btnId, tagId) {
-    var b = document.getElementById(btnId);
-    b.addEventListener("click", function() {
-      b.disabled = true;
-      document.getElementById(tagId).hidden = false;
-      fetch(b.dataset.url, {method: "POST", headers: {"X-CSRFToken": csrf}})
-        .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.error) { b.disabled = false; alert(d.error); } });
-    });
-  }
-  bind("btn-relevance", "tag-relevance");
-  bind("btn-embed", "tag-embed");
+  var jobs = ["relevance", "embed"];
+  // 上一次取樣，用來算「篇／秒」。在前端算而不是在後端存狀態——
+  // 速率只是給人看的即時感受，不值得為它多一份要維護的伺服器狀態。
+  var last = {};
 
-  // 只在有東西在跑時輪詢——沒事也每 5 秒打一次資料庫是浪費。
-  var timer = null;
+  function el(id) { return document.getElementById(id); }
+
+  function paint(name, running, pending) {
+    el("tag-" + name).hidden = !running;
+    el("btn-" + name).disabled = running;
+    el("pending-" + name).textContent = pending.toLocaleString();
+
+    var rate = el("rate-" + name);
+    var now = Date.now();
+    if (!running) {
+      rate.textContent = "";
+      last[name] = null;
+      return;
+    }
+    // **用累計平均，不用瞬時速率。** 兩個原因：批次是一次 2000 篇
+    // 完成，中間毫無變化，瞬時速率會在 0 與數百之間跳；而爬蟲持續
+    // 入庫會讓待處理量在批次之間上升，瞬時值甚至是負的。
+    var first = last[name];
+    if (!first) {
+      last[name] = {t: now, pending: pending};
+      rate.textContent = "　計算中…";
+      return;
+    }
+    var elapsed = (now - first.t) / 1000;
+    var done = first.pending - pending;
+    if (elapsed < 10 || done <= 0) return;      // 樣本太短就先不顯示
+    var perSec = done / elapsed;
+    var left = pending / perSec;
+    rate.textContent = "　" + perSec.toFixed(1) + " 篇/秒" +
+      (left > 60 ? "　約剩 " + humanize(left) : "");
+  }
+
+  function humanize(sec) {
+    if (sec > 86400) return (sec / 86400).toFixed(1) + " 天";
+    if (sec > 3600) return (sec / 3600).toFixed(1) + " 小時";
+    return Math.round(sec / 60) + " 分鐘";
+  }
+
   function poll() {
     fetch("{% url 'web:rag_status' %}")
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        document.getElementById("pending-relevance").textContent =
-          d.pending_relevance.toLocaleString();
-        document.getElementById("pending-embed").textContent =
-          d.pending_embed.toLocaleString();
-        toggle("relevance", d.relevance_running);
-        toggle("embed", d.embed_running);
-        if (!d.relevance_running && !d.embed_running && timer) {
-          clearInterval(timer); timer = null;
-        }
+        paint("relevance", d.relevance_running, d.pending_relevance);
+        paint("embed", d.embed_running, d.pending_embed);
       })
       .catch(function() {});
   }
-  function toggle(name, running) {
-    document.getElementById("tag-" + name).hidden = !running;
-    document.getElementById("btn-" + name).disabled = running;
-  }
-  function start() { if (!timer) timer = setInterval(poll, 5000); }
-  document.getElementById("btn-relevance").addEventListener("click", start);
-  document.getElementById("btn-embed").addEventListener("click", start);
-  {% if relevance_running or embed_running %}start();{% endif %}
+
+  jobs.forEach(function(name) {
+    var b = el("btn-" + name);
+    b.addEventListener("click", function() {
+      b.disabled = true;
+      el("tag-" + name).hidden = false;
+      last[name] = null;                 // 重新開始計算速率
+      fetch(b.dataset.url, {method: "POST", headers: {"X-CSRFToken": csrf}})
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.error) { b.disabled = false; alert(d.error); } })
+        .then(poll);
+    });
+  });
+
+  // 一律輪詢，不只在「知道有東西在跑」時才輪詢——作業可能是別的
+  // 分頁或排程啟動的，這一頁本來就該反映真實狀態。5 秒一次的
+  // COUNT 對已建索引的欄位成本很低。
+  poll();
+  setInterval(poll, 5000);
 })();
 </script>
 <script>

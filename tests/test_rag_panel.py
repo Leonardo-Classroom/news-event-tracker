@@ -32,35 +32,24 @@ class TestRagPanel:
     def test_需要登入(self, client):
         assert client.get("/rag/").status_code == 302
 
-    def test_空查詢只顯示覆蓋率(self, client, staff):
+    def test_顯示覆蓋率(self, client, staff):
         client.force_login(staff)
         html = client.get("/rag/").content.decode()
         assert "可被檢索" in html
-        assert "融合結果" not in html
 
-    def test_試查顯示各通道命中(self, client, staff, corpus):
+    def test_不提供查詢功能(self, client, staff, corpus):
+        """文件檢索在 /documents/，這裡再放一個只是兩處各自維護
+        一份相似的東西。"""
         client.force_login(staff)
-        html = client.get("/rag/", {"q": "京華城"}).content.decode()
-        assert "融合結果" in html
-        assert "關鍵字通道裡最新的" in html
-        assert corpus[0].title in html
+        html = client.get("/rag/").content.decode()
+        assert "線上試查" not in html
+        assert 'name="q"' not in html
 
-    def test_標示每篇有無向量(self, client, staff, corpus):
-        """兩個通道覆蓋範圍不同：關鍵字對全庫有效，向量只涵蓋已向量化
-        的部分。查不到某篇時，這一欄是第一個要看的。"""
+    def test_顯示待處理量與速率欄位(self, client, staff):
         client.force_login(staff)
-        html = client.get("/rag/", {"q": "京華城"}).content.decode()
-        assert "<th>向量</th>" in html
-
-    def test_檢索出錯不讓整頁掛掉(self, client, staff):
-        from unittest.mock import patch
-
-        client.force_login(staff)
-        with patch("apps.retrieval.hybrid.HybridRetriever.search",
-                   side_effect=RuntimeError("索引壞了")):
-            r = client.get("/rag/", {"q": "京華城"})
-        assert r.status_code == 200
-        assert "索引壞了" in r.content.decode()
+        html = client.get("/rag/").content.decode()
+        assert 'id="pending-relevance"' in html
+        assert 'id="rate-relevance"' in html
 
     def test_側欄有入口(self, client, staff):
         client.force_login(staff)

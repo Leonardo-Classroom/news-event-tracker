@@ -407,16 +407,12 @@ def pipeline(request):
 
 @require_role(Role.USER)
 def rag_panel(request):
-    """RAG 面板：檢索管線的可見度與線上試查。
+    """RAG 面板：檢索管線的覆蓋率，以及啟動前處理作業。
 
-    **為什麼需要這一頁。** 檢索出問題時（例如「查柯文哲拿到的全是
-    三月宣判日、拿不到九月的二審開庭」），從外面完全看不出是哪個
-    通道的問題——是關鍵字沒命中、向量沒覆蓋、還是融合把它擠掉了。
-    這頁把每個通道各自撈到什麼攤開來比對。
+    不提供查詢功能——文件檢索在 ``/documents/``，這裡再放一個只是
+    兩處各自維護一份相似的東西。這頁專注在「還有多少沒處理、正在
+    處理什麼、跑多快」。
     """
-    from apps.retrieval.hybrid import HybridRetriever
-    from apps.retrieval.keyword import BigramFtsBackend
-
     total = Document.objects.count()
     vectorised = Document.objects.exclude(embedding=None).count()
     relevant = Document.objects.relevant().count()
@@ -430,37 +426,8 @@ def rag_panel(request):
     pending_embed = (Document.objects.relevant()
                      .filter(embedding__isnull=True).exclude(raw_body="").count())
 
-    query = request.GET.get("q", "").strip()
-    rows: list[dict] = []
-    channel_hits: dict[str, list] = {}
-    error = ""
-    if query:
-        base = (Document.objects.select_related("source")
-                .defer("raw_body", "embedding", "search_text"))
-        try:
-            fused = HybridRetriever().search(query, base=base, top_k=25)
-            docs = {d.pk: d for d in base.filter(
-                pk__in=[c.document_id for c in fused])}
-            rows = [{"doc": docs[c.document_id], "cand": c}
-                    for c in fused if c.document_id in docs]
-            # 單獨跑關鍵字通道，讓「融合後被擠掉的」看得出來
-            kw = BigramFtsBackend()
-            matched = kw.search(base, query, mode="any")
-            channel_hits = {
-                "keyword_total": matched.count(),
-                "keyword_newest": list(
-                    kw.rank(matched, query)
-                    .filter(published_at__isnull=False)[:300]),
-            }
-            channel_hits["keyword_newest"] = sorted(
-                channel_hits["keyword_newest"],
-                key=lambda d: d.published_at, reverse=True)[:8]
-        except Exception as exc:                   # noqa: BLE001
-            error = str(exc)
-
     return render(request, "web/rag.html", {
-        "nav": "rag", "query": query, "rows": rows, "error": error,
-        "channel_hits": channel_hits,
+        "nav": "rag",
         "total": total, "vectorised": vectorised, "relevant": relevant,
         "vector_pct": vectorised / total * 100 if total else 0,
         "versions": versions,

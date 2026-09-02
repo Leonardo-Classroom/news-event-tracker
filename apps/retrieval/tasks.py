@@ -55,7 +55,10 @@ def assess_relevance_batch(resume: bool = False) -> dict:
     # 出來遲早會分岔。
     call_command("assess_relevance", limit=RELEVANCE_BATCH)
 
-    cache.touch(RELEVANCE_LOCK, LOCK_TTL)
+    # 用 set 而非 touch：每批都重寫，鎖若因任何原因消失（例如測試
+    # 誤刪、Redis 重啟）下一批會自己補回來，不會變成「明明在跑卻
+    # 顯示沒在跑」。
+    cache.set(RELEVANCE_LOCK, "1", LOCK_TTL)
     assess_relevance_batch.delay(resume=True)
     logger.info("相關性判定：本批 %d 篇，尚餘約 %d", RELEVANCE_BATCH, remaining)
     return {"remaining": remaining, "done": False}
@@ -84,7 +87,7 @@ def embed_batch(resume: bool = False) -> dict:
     # 版本的處理都在那裡，複製出來遲早會分岔。
     call_command("embed_documents", limit=EMBED_BATCH)
 
-    cache.touch(EMBED_LOCK, LOCK_TTL)
+    cache.set(EMBED_LOCK, "1", LOCK_TTL)
     embed_batch.delay(resume=True)
     logger.info("向量化：本批 %d 篇，尚餘約 %d", EMBED_BATCH, remaining)
     return {"remaining": remaining, "done": False}

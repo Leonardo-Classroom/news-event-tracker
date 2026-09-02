@@ -38,3 +38,19 @@ def official_source(db):
         service_window_start_hour=0,
         service_window_end_hour=6,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cache(settings):
+    """測試不得共用正式環境的 Redis 快取。
+
+    踩過的坑：RAG 面板用快取當「作業執行中」的旗標，而測試的
+    setup 會清掉那個 key——跑一次完整測試套件就把正在執行的正式
+    作業標記成「沒在跑」，UI 於是顯示按鈕可按、實際上還在跑。
+    """
+    settings.CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "test-isolated",
+        }
+    }
