@@ -88,12 +88,56 @@
     return el;
   }
 
+  // 逐字顯示。這是視覺效果，不是真的串流——回應是結構化 JSON
+  // （reply 加 suggestions），邊解析未完成的 JSON 很脆弱，所以等
+  // 整份回來再逐字寫出。
+  var typing = null;
+
+  function typeInto(el, text) {
+    stopTyping();
+    el.textContent = "";
+    // 尊重使用者的「減少動態效果」偏好——有些人會因動態不適。
+    if (window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.textContent = text;
+      msgs.scrollTop = msgs.scrollHeight;
+      return;
+    }
+    // 每次寫幾個字：長回應若逐字寫會拖到數十秒，因此把總步數壓在
+    // 約 150 步以內（約 3 秒），短回應仍是一次一字。
+    var step = Math.max(1, Math.ceil(text.length / 150));
+    var i = 0;
+    // 捲到底只在使用者本來就在底部時才做，否則會把往回看的人拉走。
+    var stick = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40;
+    typing = setInterval(function() {
+      i += step;
+      el.textContent = text.slice(0, i);
+      if (stick) msgs.scrollTop = msgs.scrollHeight;
+      if (i >= text.length) stopTyping();
+    }, 20);
+    el.dataset.full = text;
+  }
+
+  function stopTyping() {
+    if (!typing) return;
+    clearInterval(typing);
+    typing = null;
+    // 中途被打斷時把整段補完，不要留半句話。
+    var half = msgs.querySelector(".msg[data-full]");
+    if (half) {
+      half.textContent = half.dataset.full;
+      delete half.dataset.full;
+    }
+  }
+
   function send() {
     var text = area.value.trim();
     if (!text) return;
+    stopTyping();               // 上一則還在打字就先補完
     area.value = "";
     bubble("user", text);
-    var pending = bubble("assistant pending", "思考中…");
+    var pending = bubble("assistant pending", "");
+    pending.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
     button.disabled = true;
 
     var body = new FormData();
@@ -107,8 +151,8 @@
           pending.className = "msg assistant error";
           return;
         }
-        pending.textContent = res.d.reply;
         pending.className = "msg assistant";
+        typeInto(pending, res.d.reply);
         sugs.innerHTML = res.d.suggestions_html;
         bindSugs();
         // 第一輪之後 AI 會把預設的日期時間標題換成主題名稱

@@ -343,7 +343,22 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
       white-space: pre-wrap; line-height: 1.6; font-size: 13px; }
 .msg.user { align-self: flex-end; background: var(--danger-bg); color: var(--text); }
 .msg.assistant { align-self: flex-start; background: var(--surface-2); }
-.msg.pending { color: var(--text-3); font-style: italic; }
+.msg.pending { color: var(--text-3); }
+
+/* 等待回應時的三點動畫。用動畫而非「思考中…」四個字，是因為靜止的
+   文字看不出系統還活著；等待可能長達數秒。 */
+.dots { display: inline-flex; gap: 4px; align-items: center; height: 1.6em; }
+.dots i { width: 5px; height: 5px; border-radius: 50%;
+      background: var(--text-3); animation: dot 1.2s infinite ease-in-out; }
+.dots i:nth-child(2) { animation-delay: .18s; }
+.dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes dot {
+  0%, 60%, 100% { opacity: .25; transform: translateY(0); }
+  30%           { opacity: 1;   transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dots i { animation: none; opacity: .5; }
+}
 .msg.error { color: var(--danger); }
 .eb-input { display: flex; gap: 8px; align-items: flex-end;
       border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
