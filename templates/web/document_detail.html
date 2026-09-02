@@ -32,8 +32,8 @@
 
     {% if doc.case_numbers or doc.tax_ids %}
     <div class="card"><h2>識別碼</h2><div class="body"><div class="chips">
-      {% for n in doc.case_numbers %}<span class="tag accent mono">{{ n }}</span>{% endfor %}
-      {% for n in doc.tax_ids %}<span class="tag muted mono">統編 {{ n }}</span>{% endfor %}
+      {% for n in doc.case_numbers %}{% include "web/_term_tag.html" with term=n style="accent mono" %}{% endfor %}
+      {% for n in doc.tax_ids %}{% include "web/_term_tag.html" with term="統編 "|add:n q=n style="muted mono" %}{% endfor %}
     </div></div></div>
     {% endif %}
 
@@ -48,7 +48,7 @@
       {% for category, terms in doc.relevance_signals.hits.items %}
         <div style="margin-bottom:6px">
           <div style="font-size:11px;color:var(--text-3)">{{ category }}</div>
-          <div class="chips">{% for t in terms %}<span class="tag muted">{{ t }}</span>{% endfor %}</div>
+          <div class="chips">{% for t in terms %}{% include "web/_term_tag.html" with term=t %}{% endfor %}</div>
         </div>
       {% endfor %}
     </div></div>

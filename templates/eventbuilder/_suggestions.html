@@ -7,7 +7,7 @@
     </div>
     {% if s.summary %}<p class="sug-sum">{{ s.summary }}</p>{% endif %}
     {% if s.tags %}
-      <div class="chips">{% for t in s.tags %}<span class="tag muted">{{ t }}</span>{% endfor %}</div>
+      <div class="chips">{% for t in s.tags %}{% include "web/_term_tag.html" with term=t %}{% endfor %}</div>
     {% endif %}
     <div class="sug-foot">
       {% if s.is_tracked %}

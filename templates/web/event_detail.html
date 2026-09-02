@@ -101,7 +101,7 @@
     <div class="card">
       <h2>案號</h2>
       <div class="body"><div class="chips">
-        {% for n in event.case_numbers %}<span class="tag muted mono">{{ n }}</span>{% endfor %}
+        {% for n in event.case_numbers %}{% include "web/_term_tag.html" with term=n style="muted mono" %}{% endfor %}
       </div></div>
     </div>
     {% endif %}

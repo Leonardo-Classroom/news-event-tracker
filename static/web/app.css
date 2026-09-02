@@ -422,3 +422,9 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
       vertical-align: middle; }
 .trash-tb tr:last-child td { border-bottom: 0; }
 .dots-note { margin-left: 8px; font-size: 11px; color: var(--text-3); }
+
+/* 可點擊的內容標籤。與不可點的狀態標籤要看得出差別——後者點了去
+   搜尋「未公開」沒有意義，因此只有這種才有 hover 反應與游標。 */
+a.term-tag { cursor: pointer; text-decoration: none; }
+a.term-tag:hover { border-color: currentColor; text-decoration: none;
+      filter: brightness(0.94); }

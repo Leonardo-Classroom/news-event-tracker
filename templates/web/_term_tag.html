@@ -1,0 +1,13 @@
+{% comment %}
+可點擊的內容標籤：連到文件檢索，開新分頁。
+
+只用在「內容詞」（案號、統編、事件核心詞、AI 標籤），不要用在狀態
+標籤——搜尋「未公開」「從未成功」沒有任何意義。
+
+`term` 是顯示文字，`q` 是實際查詢（多數時候相同；統編會顯示成
+「統編 12345678」但只查數字）。
+{% endcomment %}
+<a class="tag {{ style|default:'muted' }} term-tag"
+   href="{% url 'web:documents' %}?q={{ q|default:term|urlencode }}&source=&only="
+   target="_blank" rel="noopener"
+   title="在文件中搜尋「{{ q|default:term }}」">{{ term }}</a>
