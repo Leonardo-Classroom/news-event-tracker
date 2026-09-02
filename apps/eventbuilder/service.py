@@ -388,6 +388,15 @@ def create_event_from(suggestion: EventSuggestion):
     return event
 
 
+#: 標題生成的輸出額度。**不能設成「標題很短所以 64 就夠」**——
+#: 推理內容會計入 completion_tokens 卻不在 content 裡，實測
+#: max_tokens=64 時 out_tok 剛好 64、finish_reason='length'、
+#: content 完全是空字串。空字串不會拋例外，所以標題靜默地永遠沒被
+#: 改，連日誌都沒有。而推理量隨輸入脈絡成長：2 則訊息時 512 夠用
+#: （out_tok=146），13 則訊息時 512 又爆掉。
+_TITLE_MAX_TOKENS = 2048
+
+
 def _rename_by_topic(conversation: Conversation, *, provider) -> None:
     """第一輪討論後把預設的日期時間標題換成主題名稱。
 
@@ -395,18 +404,36 @@ def _rename_by_topic(conversation: Conversation, *, provider) -> None:
     只做一次（``title_generated``），之後使用者自己改的名字不該被覆寫。
     """
     try:
+        # **只送第一則使用者訊息，不送整串對話。** 標題要反映的是
+        # 「這段討論在談什麼」，而那在第一句就決定了。送整串除了
+        # 更貴，還會讓推理量隨對話長度成長——實測 13 則訊息時連
+        # 2048 都可能不夠，而第一則訊息永遠只有一句話。
+        opening = conversation.messages.filter(role=Role.USER).first()
+        if opening is None:
+            return
         response = provider.complete(
             messages=[{"role": "system", "content": _TITLE_PROMPT},
-                      *_history(conversation)],
-            purpose=LlmPurpose.OTHER, temperature=0.3, max_tokens=64,
+                      {"role": "user", "content": opening.content[:500]}],
+            purpose=LlmPurpose.OTHER, temperature=0.3,
+            max_tokens=_TITLE_MAX_TOKENS,
             task_name="eventbuilder.title",
         )
         title = " ".join(response.text.split()).strip("「」\"' 。")
     except (LlmError, ValueError) as exc:
-        logger.info("對話標題生成失敗，保留預設名稱：%s", exc)
-        return
+        logger.info("對話標題生成失敗，退回使用者第一句：%s", exc)
+        title = ""
 
-    if title:
-        conversation.title = title[:128]
-        conversation.title_generated = True
-        conversation.save(update_fields=["title", "title_generated", "updated_at"])
+    if not title:
+        # 空字串不會拋例外，不記下來就會像「功能沒壞但也沒作用」。
+        # 實測政治敏感的提問會讓模型推理特別久而撞上限、content 為空。
+        logger.warning("標題生成回傳空字串，退回使用者第一句")
+        # **退回第一句而非保留日期時間。** 使用者要的是「一眼看得出
+        # 這段在談什麼」，而第一句本來就描述了主題；留著
+        # 「2026-09-03 01:42」等於這個功能沒有作用。
+        title = " ".join(opening.content.split())[:24]
+
+    if not title:
+        return
+    conversation.title = title[:128]
+    conversation.title_generated = True
+    conversation.save(update_fields=["title", "title_generated", "updated_at"])

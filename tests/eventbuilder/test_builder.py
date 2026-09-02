@@ -518,3 +518,50 @@ class TestResumeAfterRefresh:
         r = client.get(f"/build/c/{conversation.pk}/pending/")
         assert r.status_code == 404
         assert r.json()["stale"] is True
+
+
+@pytest.mark.medium
+class TestTitleGeneration:
+    """第一輪對話後標題必須從日期時間改成主題名稱。
+
+    實測踩過的坑：原本 max_tokens=64，但推理內容會計入
+    completion_tokens 卻不在 content 裡——out_tok 剛好用滿 64、
+    content 是空字串。空字串不拋例外，所以標題靜默地永遠沒被改，
+    連日誌都沒有，19 則訊息的對話仍叫「2026-09-03 01:42」。
+    """
+
+    def test_生成空字串時退回使用者第一句(self, conversation):
+        """留著日期時間等於這個功能沒有作用。"""
+        provider = FakeProvider([TURN, ""])
+        send_message(conversation, "我想追蹤京華城容積案的最新進度",
+                     provider=provider)
+        conversation.refresh_from_db()
+        assert conversation.title.startswith("我想追蹤京華城容積案")
+        assert conversation.title_generated is True
+
+    def test_生成失敗時也退回第一句(self, conversation):
+        from apps.llm.provider import LlmError
+
+        class Failing(FakeProvider):
+            def complete(self, **kwargs):
+                if kwargs.get("task_name") == "eventbuilder.title":
+                    raise LlmError("逾時")
+                return super().complete(**kwargs)
+
+        send_message(conversation, "新竹棒球場的弊案進度",
+                     provider=Failing([TURN]))
+        conversation.refresh_from_db()
+        assert conversation.title == "新竹棒球場的弊案進度"
+
+    def test_標題呼叫只送第一則訊息(self, conversation):
+        """推理量隨脈絡成長——實測 13 則訊息時連 2048 都可能不夠，
+        而標題要反映的主題在第一句就決定了。"""
+        for i in range(6):
+            Message.objects.create(conversation=conversation, role=Role.USER,
+                                   content=f"後續追問{i}")
+        provider = FakeProvider([TURN, "標題"])
+        send_message(conversation, "最新的呢", provider=provider)
+        title_call = [c for c in provider.calls
+                      if c.get("task_name") == "eventbuilder.title"][0]
+        assert len(title_call["messages"]) == 2       # system + 第一則
+        assert title_call["max_tokens"] >= 2048

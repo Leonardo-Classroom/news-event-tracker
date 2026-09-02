@@ -114,7 +114,8 @@ a:hover { text-decoration: underline; }
 .brand span { color: var(--text-3); font-size: 11px; }
 /* 公開頁入口。刻意不做成 nav 項目——那些是內部工具的頁面，這個是
    離開內部工具、去看讀者看到的東西，性質不同。 */
-.brand-public { display: inline-block; margin-top: 8px; font-size: 11px;
+/* block 而非 inline-block：.brand span 是 inline，兩者並排會擠在同一行 */
+.brand-public { display: block; margin-top: 8px; font-size: 11px;
       color: var(--text-2); }
 .brand-public:hover { color: var(--text); }
 
@@ -327,8 +328,12 @@ input:focus, select:focus { outline: 2px solid var(--accent-bg); border-color: v
       border-radius: var(--radius); }
 .eb-conv:hover { background: var(--surface-2); }
 .eb-conv.on { background: var(--surface-2); font-weight: 600; }
-.eb-conv > a { flex: 1; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap; font-size: 12px; }
+.eb-conv > a { flex: 1; min-width: 0; font-size: 12px; line-height: 1.35; }
+.eb-conv > a > :first-child, .eb-conv > a { overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+/* 建立時間：改名之後標題就看不出是哪天開的，這行補回那個資訊 */
+.eb-when { display: block; font-size: 10px; color: var(--text-3);
+      font-family: var(--mono); font-weight: 400; }
 .eb-menu { position: relative; }
 .eb-menu > summary { cursor: pointer; list-style: none; padding: 0 4px;
       color: var(--text-3); }
