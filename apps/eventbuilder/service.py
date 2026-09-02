@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
 
 from django.utils import timezone
 
@@ -137,6 +138,62 @@ def _candidate_block(documents: list[Document]) -> str:
     return "館藏文件（只能引用這些編號）：\n" + "\n".join(lines)
 
 
+#: 模型偶爾會回傳截斷或非 JSON 的內容（2026-09-03 實測：同一個 prompt
+#: 連跑 3 次都正常，但使用者實際遇到過一次空回應、一次在
+#: `"suggestions":[],` 就斷掉）。這是間歇性故障，重試一次就好——
+#: 重試太多次只是把使用者的等待時間拉長。
+_RETRIES = 1
+
+#: 從截斷的 JSON 裡救出 reply。實測失敗案例中 reply 本身是完整的，
+#: 只有後面的欄位被切掉——與其整輪失敗，不如至少把話講完。
+_REPLY_RE = re.compile(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _ask(provider, messages) -> tuple[dict | None, str]:
+    """呼叫模型並解析 JSON。回傳 ``(payload, 錯誤訊息)``。"""
+    last = ""
+    for attempt in range(_RETRIES + 1):
+        try:
+            response = provider.complete(
+                messages=messages, purpose=LlmPurpose.EVENT_SUMMARY,
+                json_schema=_SCHEMA, temperature=0.3,
+                task_name="eventbuilder.turn",
+            )
+        except LlmError as exc:
+            return None, str(exc)
+
+        try:
+            return response.json(), ""
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # finish_reason 必須檢查：撞上 max_tokens 而被截斷的 JSON，
+        # 表面上看起來就是「解析失敗」，會把問題指向錯誤的方向
+        # （LlmResponse.finish_reason 的註解已經警告過這件事）。
+        if response.finish_reason == "length":
+            last = "回應過長被截斷，請把問題描述得更聚焦一些"
+            break
+
+        salvaged = _salvage_reply(response.text)
+        if salvaged and attempt >= _RETRIES:
+            # 救得回 reply 就別讓整輪失敗——候選事件下一輪還會再提。
+            logger.info("模型回傳的 JSON 不完整，已救回 reply（%d 字）",
+                        len(salvaged))
+            return {"reply": salvaged, "suggestions": [], "documents": []}, ""
+        last = "AI 回覆格式異常，請再說一次"
+    return None, last or "AI 回覆格式異常，請再說一次"
+
+
+def _salvage_reply(text: str) -> str:
+    match = _REPLY_RE.search(text or "")
+    if not match:
+        return ""
+    try:
+        return json.loads(f'"{match.group(1)}"')
+    except (json.JSONDecodeError, ValueError):
+        return ""
+
+
 def send_message(conversation: Conversation, text: str, *, provider=None) -> TurnResult:
     """送出一則使用者訊息，取得回覆與新的候選事件。"""
     text = (text or "").strip()
@@ -159,18 +216,12 @@ def send_message(conversation: Conversation, text: str, *, provider=None) -> Tur
                          "content": _candidate_block(candidates)})
     messages += _history(conversation)
 
-    try:
-        response = provider.complete(
-            messages=messages, purpose=LlmPurpose.EVENT_SUMMARY,
-            json_schema=_SCHEMA, temperature=0.3,
-            task_name="eventbuilder.turn",
-        )
-        payload = response.json()
-    except (LlmError, json.JSONDecodeError, ValueError) as exc:
-        logger.warning("建立事件對話失敗：%s", exc)
+    payload, error = _ask(provider, messages)
+    if payload is None:
+        logger.warning("建立事件對話失敗：%s", error)
         # 使用者的訊息已經寫進去了，不回滾——讓他看得到自己說過什麼，
         # 重試時也不必重打。
-        return TurnResult(reply="", suggestions=[], error=str(exc))
+        return TurnResult(reply="", suggestions=[], error=error)
 
     reply = (payload.get("reply") or "").strip()
     assistant = Message.objects.create(conversation=conversation,

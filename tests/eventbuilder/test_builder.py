@@ -27,6 +27,7 @@ class FakeProvider:
         class _R:
             text = value if isinstance(value, str) else json.dumps(value,
                                                                    ensure_ascii=False)
+            finish_reason = "stop"
 
             def json(self):
                 return json.loads(self.text)
@@ -309,3 +310,46 @@ class TestCitedDocuments:
             client.post(f"/build/c/{conversation.pk}/send/", {"text": "問題"})
         html = client.get(f"/build/c/{conversation.pk}/").content.decode()
         assert f'href="/documents/{docs[0].pk}/"' in html
+
+
+@pytest.mark.medium
+class TestMalformedResponse:
+    """模型偶爾回傳截斷或非 JSON 的內容（使用者實際遇到過空回應，
+    以及在 `"suggestions":[],` 就斷掉的截斷 JSON）。"""
+
+    def test_壞掉後重試一次就成功(self, conversation):
+        provider = FakeProvider(["不是 JSON", TURN, "標題"])
+        result = send_message(conversation, "問題", provider=provider)
+        assert result.error == ""
+        assert len(result.suggestions) == 1
+
+    def test_截斷的json至少救回reply(self, conversation):
+        """實測失敗案例中 reply 本身是完整的，只有後面的欄位被切掉
+        ——與其整輪失敗，不如至少把話講完。"""
+        broken = '{"reply":"我無法用政黨立場替你篩選案件。","suggestions":[],'
+        result = send_message(conversation, "問題",
+                              provider=FakeProvider([broken, broken, "標題"]))
+        assert result.error == ""
+        assert result.reply == "我無法用政黨立場替你篩選案件。"
+        assert result.suggestions == []
+
+    def test_完全無法解析時給可讀訊息(self, conversation):
+        """不要把 JSONDecodeError 的原文丟給使用者——
+        「Expecting value: line 1 column 1 (char 0)」指不出任何原因。"""
+        result = send_message(conversation, "問題",
+                              provider=FakeProvider(["", ""]))
+        assert "格式異常" in result.error
+        assert "Expecting value" not in result.error
+
+    def test_撞上max_tokens時明說被截斷(self, conversation):
+        """finish_reason=length 的截斷 JSON 表面上就是「解析失敗」，
+        會把問題指向錯誤的方向。"""
+        class Truncated(FakeProvider):
+            def complete(self, **kwargs):
+                r = super().complete(**kwargs)
+                r.finish_reason = "length"
+                return r
+
+        result = send_message(conversation, "問題",
+                              provider=Truncated(['{"reply":"半句']))
+        assert "截斷" in result.error
