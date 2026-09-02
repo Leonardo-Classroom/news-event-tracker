@@ -10,7 +10,7 @@
   <div class="card"><div class="stat">
     <div class="label">可被檢索（已向量化）</div>
     <div class="value">{{ vectorised|floatformat:0 }}</div>
-    <div class="note">佔判定為相關者 {{ vector_pct|floatformat:1 }}%　全庫共 {{ total|floatformat:0 }} 篇</div>
+    <div class="note">{{ vectorised|floatformat:0 }} / {{ total|floatformat:0 }} 全庫（{{ vector_pct|floatformat:1 }}%）</div>
     <div class="bar" style="margin-top:6px"><i style="width:{{ vector_pct }}%"></i></div></div></div>
   <div class="card"><div class="stat">
     <div class="label">關鍵字通道</div>
@@ -67,9 +67,12 @@
 </div>
 
 <p class="sub" style="margin:-4px 0 14px">
-  <b>兩個通道的覆蓋範圍不同</b>：關鍵字（bigram）對全庫都有效；向量只涵蓋已判定為相關並完成向量化的
-  {{ vectorised|floatformat:0 }} 篇。所以一篇沒向量化的文件仍可能被關鍵字撈到，反之則否——
-  查不到某篇時，先看它在下方哪個通道出現。
+  <b>3% 不是故障，是設計如此</b>：只有「判定為相關」的文件才會被向量化——目前
+  {{ relevant|floatformat:0 }} 篇判定為相關，其中 {{ vectorised|floatformat:0 }} 篇已完成。
+  其餘多數文件（體育、影劇、國際）與追蹤主題無關，向量化它們只是浪費算力與儲存。
+  <br>
+  <b>兩個通道的覆蓋範圍因此不同</b>：關鍵字（bigram）對全庫都有效，向量只涵蓋這
+  {{ vectorised|floatformat:0 }} 篇。所以沒向量化的文件仍可能被關鍵字撈到，反之則否。
 </p>
 
 <script>
